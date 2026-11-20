@@ -230,6 +230,22 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
   **Im Spiel noch ungetestet.**
 - Hinweis Sollumz: YCD nur als XML (kein Binär-Import/-Export).
 
+### Stand 20.11.2026 (2) – GitHub, Erkennung, Updates
+
+- Repo: https://github.com/TDIJunkie/GTA-TOOL (Branch `main`, CodeWalker als Submodul `vendor/CodeWalker`).
+- [x] **Automatische Suche** (`app/detect.js`): GTA V (Rockstar-/Steam-/Epic-Registry, libraryfolders.vdf, Epic-Manifeste,
+      Uninstall-Einträge, typische Ordner, begrenzte Laufwerkssuche), Blender (Program Files, Uninstall, .blend-Zuordnung,
+      Steam, PATH, Ordner `*blender*` auf allen Laufwerken, Laufwerkssuche), Sollumz (Benutzer-/portable Add-on- und
+      Extension-Ordner, Version aus `blender_manifest.toml`). Bevorzugt Blender ≥ 4.2 mit Sollumz. ~2–3 s im Hintergrund.
+- [x] **Hinweis beim Start**, wenn etwas fehlt (mit Download-Links, „nicht mehr anzeigen“ = `setupDismissed`);
+      Einstellungen zeigen „Gefundene Programme“ + „Erneut suchen“. Blender-Funktionen prüfen Blender **und** Sollumz (`requireBlender`).
+- [x] **Updates** (`electron-updater`, GitHub-Releases): Prüfung beim Start, Download im Hintergrund, Dialog „Jetzt neu starten“;
+      sonst Installation beim Beenden. Nur in der installierten Version (nicht win-unpacked).
+- **Release veröffentlichen:** Version in `package.json` erhöhen → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`.
+  GitHub Actions (`.github/workflows/release.yml`) baut den Installer und lädt `GTA-Tool-Setup-X.Y.Z.exe` + `latest.yml` hoch.
+  Lokal alternativ: `GH_TOKEN=… npm run release`. **Installer/Release nur nach Freigabe durch den Nutzer.**
+- Wichtig: Für Updates bei anderen Nutzern muss das Repo (bzw. die Releases) **öffentlich** sein.
+
 ### Offen / nächste Schritte
 
 - [ ] Animation Studio: neue Animation in Blender von Grund auf erstellen; Clip-Tags/Eigenschaften bearbeiten;
