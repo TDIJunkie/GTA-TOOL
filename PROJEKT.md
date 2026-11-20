@@ -247,6 +247,21 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
   (`differentialPackage: false` → Updates laden immer das ganze Setup). **Release nur nach Freigabe durch den Nutzer.**
 - Wichtig: Für Updates bei anderen Nutzern muss das Repo (bzw. die Releases) **öffentlich** sein.
 
+### Stand 20.11.2026 (3) – SFTP (Version 0.2.0, vom Nutzer getestet und veröffentlicht)
+
+- [x] **Server verwalten** (`app/sftp.js`, `app/renderer/sftp.js`, Einstellungen → „SFTP-Server“): Host, Port, Benutzer,
+      Passwort oder Schlüsseldatei (+ Passphrase), Startordner, „Verbindung testen“. Geheimnisse mit `safeStorage` (Windows-DPAPI)
+      verschlüsselt in settings.json (`sftpServers`). Server-Schlüssel wird beim ersten Verbinden gemerkt; Änderung → Warnung, kein Verbinden.
+- [x] **Import**: Knopf „🌐 Vom Server (SFTP)“ in allen vier Studios (Startfläche + „Hinzufügen“). Server-Browser mit Ordnern,
+      Mehrfachauswahl (nichts gewählt = ganzer Ordner). Download in `%TEMP%\GTATool\sftp-*` (Ordnernamen bleiben erhalten), dann normal öffnen.
+- [x] **Export**: im Export-Dialog „Ordner auf dem PC“ / „Server (SFTP)“. Export in Zwischenordner → Upload nach `<zielordner>/<resource>`;
+      vorhandene Resource auf dem Server wird nach Rückfrage komplett ersetzt. Letzter Server/Ordner wird gemerkt (`sftpLast`).
+- Bibliothek `ssh2-sftp-client` 11.0.0 (reines JS, `npmRebuild: false`).
+- Getestet mit eigenem lokalen Test-SFTP-Server (ssh2): falsches Passwort, Auflisten, Download/Upload byte-genau, neue Zielordner,
+  Überschreiben, Host-Key-Wechsel, Verbindungsabbruch mitten im Download (Neuversuch); kompletter Ablauf über die Oberfläche.
+  Übertragung schonend (4 parallele Anfragen), bei Fehler Neuverbindung + sequenziell (Fix für „No response from server“ beim Nutzer).
+  Schlüsseldatei-Anmeldung noch ungetestet.
+
 ### Offen / nächste Schritte
 
 - [ ] Animation Studio: neue Animation in Blender von Grund auf erstellen; Clip-Tags/Eigenschaften bearbeiten;

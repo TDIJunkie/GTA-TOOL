@@ -65,9 +65,10 @@
         <div class="drop-icon">⬇</div>
         <h2>Fahrzeug öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> oder einzelne <b>Dateien</b> hierher.<br>Das Tool durchsucht alles automatisch – Archive, Modelle, Tuningteile, Texturen und Meta-Dateien.</p>
-        <div class="row center gap">
+        <div class="row center gap wrap">
           <button class="btn primary big" data-open="folder">📁 Ordner importieren</button>
           <button class="btn big" data-open="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="vehicles">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
     </main>
@@ -112,6 +113,7 @@
         <div class="row center gap wrap">
           <button class="btn primary big" data-copen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-copen="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="clothing">🌐 Vom Server (SFTP)</button>
           <button class="btn big" id="cs-gta">👕 Aus GTA-Kleidung wählen</button>
         </div>
       </div>
@@ -151,9 +153,10 @@
         <h2>Interior (MLO) öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> (FiveM-Map-Resource) oder einzelne <b>Dateien</b> hierher.<br>
           Das Tool erkennt .ytyp, .ymap, Modelle, Texturen und Kollisionen automatisch – auch in dlc.rpf.</p>
-        <div class="row center gap">
+        <div class="row center gap wrap">
           <button class="btn primary big" data-mopen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-mopen="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="mlo">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
     </main>
@@ -191,9 +194,10 @@
         <h2>Animationen öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Resource) oder einzelne <b>Dateien</b> hierher.<br>
           Erkannt werden Animations-Dateien (.ycd), CodeWalker-/Sollumz-XML (.ycd.xml) und Archive (.rpf).</p>
-        <div class="row center gap">
+        <div class="row center gap wrap">
           <button class="btn primary big" data-aopen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-aopen="animfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="anim">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
     </main>
@@ -232,6 +236,7 @@
   <script src="clothing.js"></script>
   <script src="mlo.js"></script>
   <script src="anim.js"></script>
+  <script src="sftp.js"></script>
   <script src="app.js"></script>
   <script type="module" src="viewer3d.js"></script>
 </body>

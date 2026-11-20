@@ -70,6 +70,7 @@ const VehicleStudio = (() => {
       title: 'Weitere Dateien hinzufügen',
       body: h('p.muted', 'Die Dateien werden zur aktuellen Auswahl hinzugefügt (z. B. Felgen oder ein zweites Fahrzeug).'),
       buttons: [
+        { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(VehicleStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) },
         { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('files', true) },
       ],
@@ -1050,26 +1051,25 @@ const VehicleStudio = (() => {
     const preview = h('div.hint');
     const upd = () => { preview.textContent = dirIn.value ? `Wird erstellt: ${dirIn.value.replace(/[\\/]$/, '')}\\${nameIn.value.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}` : ''; };
     nameIn.addEventListener('input', upd); dirIn.addEventListener('input', upd); upd();
+    const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
+      onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) { dirIn.value = r[0]; upd(); } },
+    }, 'Durchsuchen …')), preview);
+    const target = Sftp.targetField(localField, dirIn);
     modal({
       title: 'Als FiveM-Resource exportieren',
       body: h('div',
-        h('p.muted', 'Erstellt einen fertigen Resource-Ordner (fxmanifest.lua, stream, data). Den Ordner einfach in den resources-Ordner deines Servers kopieren und in der server.cfg „ensure <name>“ eintragen.'),
+        h('p.muted', 'Erstellt einen fertigen Resource-Ordner (fxmanifest.lua, stream, data) – auf deinem PC oder direkt auf deinem Server. Danach in der server.cfg „ensure <name>“ eintragen.'),
         h('div.field', h('label', 'Name der Resource'), nameIn, h('div.hint', 'Nur Kleinbuchstaben, Zahlen, „_“ und „-“.')),
-        h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
-          onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) { dirIn.value = r[0]; upd(); } },
-        }, 'Durchsuchen …')), preview)),
+        target.el,
+        localField),
       buttons: [
         { label: 'Abbrechen' },
         {
           label: '📦 Exportieren', primary: true,
           onClick: async () => {
-            const outDir = dirIn.value.trim(), resourceName = nameIn.value.trim();
-            if (!outDir) { toast('Bitte einen Zielordner wählen.', 'warn'); return true; }
-            if (!resourceName) { toast('Bitte einen Namen eingeben.', 'warn'); return true; }
-            if (await call('fivem:exists', { outDir, resourceName })) {
-              if (!await UI.confirm('Überschreiben?', 'Eine Resource mit diesem Namen existiert dort schon. Überschreiben?', 'Überschreiben', { danger: true })) return true;
-            }
-            const r = await call('fivem:export', { outDir, resourceName }, { busyText: 'FiveM-Resource wird erstellt …' });
+            const resourceName = nameIn.value.trim();
+            const r = await Sftp.runExport(target.get(), resourceName,
+              (outDir) => call('fivem:export', { outDir, resourceName }, { busyText: 'FiveM-Resource wird erstellt …' }));
             if (!r) return true;
             S.dirty = false;
             updateStatus();
@@ -1086,17 +1086,14 @@ const VehicleStudio = (() => {
       title: '✓ Export fertig',
       body: h('div',
         h('p', 'Die Resource wurde erstellt:'),
-        h('p', h('code', r.folder)),
+        Sftp.resultPath(r),
         h('div.cards',
           h('div.card', h('div.k', 'Stream-Dateien'), h('div.v', String(r.streamFiles))),
           h('div.card', h('div.k', 'Meta-Dateien'), h('div.v', String(r.metaFiles))),
           r.vehicles.length ? h('div.card', h('div.k', 'Spawn-Namen'), h('div.v', r.vehicles.join(', '))) : null),
         warningsBox(r.warnings),
-        h('div.notice.info', 'Auf dem Server: Ordner nach „resources“ kopieren → in server.cfg ', h('code', `ensure ${base(r.folder)}`), ' → Server neu starten.')),
-      buttons: [
-        { label: 'Schließen' },
-        { label: '📂 Ordner öffnen', primary: true, onClick: () => call('shell:open', { target: r.folder }) },
-      ],
+        h('div.notice.info', r.remote ? 'Auf dem Server: in server.cfg ' : 'Auf dem Server: Ordner nach „resources“ kopieren → in server.cfg ', h('code', `ensure ${base(r.folder)}`), ' → Server neu starten.')),
+      buttons: Sftp.resultButtons(r),
     });
   }
 

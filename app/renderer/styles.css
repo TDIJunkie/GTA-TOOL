@@ -221,11 +221,11 @@ code { background: var(--panel-3); padding: 1px 6px; border-radius: 4px; font-si
 .field label { display: block; font-weight: 600; margin-bottom: 4px; }
 .field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .input-row { display: flex; gap: 8px; }
-input[type=text] {
+input[type=text], input[type=password] {
   flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--text);
   border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 0;
 }
-input[type=text]:focus { outline: none; border-color: var(--accent); }
+input[type=text]:focus, input[type=password]:focus { outline: none; border-color: var(--accent); }
 
 .preview-big { background-color: #2a2e38; border-radius: 10px; display: grid; place-items: center; min-height: 300px;
   background-image: linear-gradient(45deg, #232731 25%, transparent 25%), linear-gradient(-45deg, #232731 25%, transparent 25%),
@@ -314,7 +314,7 @@ input[type=text]:focus { outline: none; border-color: var(--accent); }
 /* ---------- Dialoge ---------- */
 label.check { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; margin-top: 4px; }
 label.check input { margin-top: 3px; accent-color: var(--accent); }
-.field input[type=text] { width: 100%; }
+.field input[type=text], .field input[type=password] { width: 100%; }
 
 /* ---------- Clothing Studio ---------- */
 .tree-sub-label { padding: 4px 10px 2px 18px; font-size: 11px; color: var(--muted); }
@@ -365,3 +365,12 @@ pre.code {
   font: 12px/1.5 Consolas, monospace; white-space: pre; overflow-x: auto; margin: 8px 0;
 }
 .pos-row .mono { min-width: 0; text-align: left; color: var(--text); }
+
+/* ---------- SFTP ---------- */
+.sftp-list { max-height: 50vh; overflow: auto; min-height: 120px; }
+.sftp-list .list-row { padding: 6px 12px; }
+.sftp-list .list-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+.field.grow { flex: 1; }
+.modal select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 220px; }
+.modal input[type=number]:not(.num) { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; }
+.modal input[type=number]:not(.num):focus { outline: none; border-color: var(--accent); }

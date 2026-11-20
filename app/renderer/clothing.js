@@ -73,6 +73,7 @@ const ClothingStudio = (() => {
       body: h('p.muted', 'Dateien kommen zur aktuellen Auswahl dazu.'),
       buttons: [
         { label: '👕 Aus GTA-Kleidung', onClick: () => gtaBrowser() },
+        { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(ClothingStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) },
         { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('files', true) },
       ],
@@ -561,33 +562,34 @@ const ClothingStudio = (() => {
     const defName = (S.model.collections[0] && S.model.collections[0].name.replace(/^mp_[mf]_/, '')) || 'kleidung';
     const nameIn = h('input', { type: 'text', value: defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
+    const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
+      onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; },
+    }, 'Durchsuchen …')));
+    const target = Sftp.targetField(localField, dirIn);
     modal({
       title: 'Kleidung als FiveM-Resource exportieren',
       body: h('div',
         h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit Modellen/Texturen, YMT und Shop-Meta je Sammlung, fxmanifest.lua.'),
         h('div.field', h('label', 'Name der Resource'), nameIn),
-        h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
-          onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; },
-        }, 'Durchsuchen …')))),
+        target.el,
+        localField),
       buttons: [
         { label: 'Abbrechen' },
         {
           label: '📦 Exportieren', primary: true,
           onClick: async () => {
-            if (!dirIn.value.trim()) { toast('Bitte einen Zielordner wählen.', 'warn'); return true; }
-            if (await call('fivem:exists', { outDir: dirIn.value.trim(), resourceName: nameIn.value.trim() })) {
-              if (!await UI.confirm('Überschreiben?', 'Eine Resource mit diesem Namen existiert dort schon. Überschreiben?', 'Überschreiben', { danger: true })) return true;
-            }
-            const r = await call('clothing:export', { outDir: dirIn.value.trim(), resourceName: nameIn.value.trim() }, { busyText: 'Resource wird erstellt …' });
+            const resourceName = nameIn.value.trim();
+            const r = await Sftp.runExport(target.get(), resourceName,
+              (outDir) => call('clothing:export', { outDir, resourceName }, { busyText: 'Resource wird erstellt …' }));
             if (!r) return true;
             S.model = r.model; S.dirty = false; renderAll();
             modal({
               title: '✓ Export fertig',
-              body: h('div', h('p', h('code', r.folder)),
+              body: h('div', Sftp.resultPath(r),
                 h('p', `${r.items} Kleidungsstücke · ${r.collections} Addon-Sammlung(en)`),
                 r.warnings.length ? h('div.notice.warn', h('ul', r.warnings.map((w) => h('li', w)))) : null,
-                h('div.notice.info', 'Ordner nach „resources“ kopieren → server.cfg: ', h('code', `ensure ${base(r.folder)}`))),
-              buttons: [{ label: 'Schließen' }, { label: '📂 Ordner öffnen', primary: true, onClick: () => call('shell:open', { target: r.folder }) }],
+                h('div.notice.info', r.remote ? 'server.cfg: ' : 'Ordner nach „resources“ kopieren → server.cfg: ', h('code', `ensure ${base(r.folder)}`))),
+              buttons: Sftp.resultButtons(r),
             });
             return false;
           },

@@ -1,12 +1,13 @@
 'use strict';
 // GTA Tool – Hauptprozess (Fenster, Dialoge, Backend, Blender, Dateiüberwachung)
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const detect = require('./detect');
+const sftp = require('./sftp');
 
 const isPacked = app.isPackaged;
 const ROOT = isPacked ? process.resourcesPath : path.join(__dirname, '..');
@@ -43,6 +44,15 @@ function loadSettings() {
 function saveSettings() {
   fs.mkdirSync(path.dirname(settingsFile()), { recursive: true });
   fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2));
+}
+
+/** Ordnername einer Resource (wie im Backend: Session.SafeName). */
+const safeResourceName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '') || 'quelle';
+
+/** Letzten Export-Ordner merken – aber nicht die Zwischenablage für SFTP-Exporte. */
+function rememberExportDir(dir) {
+  if (!dir || path.resolve(dir).toLowerCase().startsWith(path.resolve(TEMP_ROOT).toLowerCase())) return;
+  settings.lastResourceDir = dir; settings.lastExportDir = dir; saveSettings();
 }
 
 // ------------------------------------------------------------------ Einrichtung (GTA, Blender, Sollumz)
@@ -475,7 +485,7 @@ function registerIpc() {
     return call('mlo.importModel', { sessionDir, key, ydr, ytd: ytd || '', backupDir: backupDir() });
   });
   handle('mlo:export', async ({ outDir, resourceName }) => {
-    settings.lastResourceDir = outDir; settings.lastExportDir = outDir; saveSettings();
+    rememberExportDir(outDir);
     return call('mlo.export', { sessionDir, outDir, resourceName });
   });
   handle('props:status', async () => call('props.status', { cacheFile: propsCache() }));
@@ -559,7 +569,7 @@ function registerIpc() {
     return call('clothing.addFromGta', { sessionDir, gtaPath: settings.gtaPath || '', cacheFile: catalogFile(), catalogId, collection, keepTextures: keepTextures ? 'true' : 'false' });
   });
   handle('clothing:export', async ({ outDir, resourceName }) => {
-    settings.lastResourceDir = outDir; settings.lastExportDir = outDir; saveSettings();
+    rememberExportDir(outDir);
     return call('clothing.export', { sessionDir, outDir, resourceName });
   });
   handle('clothing:gender', async ({ id }) => {
@@ -654,7 +664,7 @@ function registerIpc() {
     return call('anim.exportFile', { sessionDir, file, outFile: r.filePath, format: format || 'ycd' });
   });
   handle('anim:export', async ({ outDir, resourceName, testCommand }) => {
-    settings.lastResourceDir = outDir; settings.lastExportDir = outDir; saveSettings();
+    rememberExportDir(outDir);
     return call('anim.export', { sessionDir, outDir, resourceName, testCommand: testCommand ? 'true' : 'false' });
   });
   handle('anim:blender', async ({ file, clip, clipName, ped }) => {
@@ -854,13 +864,10 @@ function registerIpc() {
 
   // FiveM-Export
   handle('fivem:export', async ({ outDir, resourceName }) => {
-    settings.lastResourceDir = outDir; settings.lastExportDir = outDir; saveSettings();
+    rememberExportDir(outDir);
     return call('fivem.export', { sessionDir, outDir, resourceName });
   });
-  handle('fivem:exists', async ({ outDir, resourceName }) => {
-    const safe = String(resourceName || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '');
-    return fs.existsSync(path.join(outDir, safe));
-  });
+  handle('fivem:exists', async ({ outDir, resourceName }) => fs.existsSync(path.join(outDir, safeResourceName(resourceName))));
 
   handle('shell:open', async ({ target }) => { await shell.openPath(target); return true; });
   handle('shell:show', async ({ target }) => { shell.showItemInFolder(target); return true; });
@@ -871,6 +878,35 @@ function registerIpc() {
     if (!['www.blender.org', 'github.com', 'www.rockstargames.com', 'store.steampowered.com', 'store.epicgames.com'].includes(host)) throw new Error('Link nicht erlaubt.');
     await shell.openExternal(url);
     return true;
+  });
+
+  // SFTP (Server)
+  handle('sftp:servers', async () => sftp.list());
+  handle('sftp:save', async ({ server, secret }) => ({ id: sftp.save(server, secret), servers: sftp.list() }));
+  handle('sftp:delete', async ({ id }) => { sftp.remove(id); return sftp.list(); });
+  handle('sftp:test', async ({ server, secret, useSaved }) => {
+    let sec = secret;
+    if (useSaved && server.id && (secret === undefined || secret === null)) sec = sftp.savedSecret(server.id);
+    return sftp.test(server, sec);
+  });
+  handle('sftp:list', async ({ id, path: p }) => sftp.listDir(id, p));
+  handle('sftp:download', async ({ id, paths }) => {
+    const r = await sftp.download(id, paths);
+    settings.sftpLast = { ...(settings.sftpLast || {}), id, importDir: path.posix.dirname(String(paths[0]).split('\\').join('/')) }; saveSettings();
+    return r;
+  });
+  handle('sftp:last', async () => settings.sftpLast || {});
+  handle('sftp:exists', async ({ id, remoteDir, resourceName }) => sftp.exists(id, remoteDir, safeResourceName(resourceName)));
+  handle('sftp:stage', async () => { const d = path.join(TEMP_ROOT, `sftp-export-${Date.now()}`); fs.mkdirSync(d, { recursive: true }); return d; });
+  handle('sftp:upload', async ({ id, local, remoteDir }) => {
+    const r = await sftp.upload(id, local, remoteDir);
+    try { fs.rmSync(path.dirname(local), { recursive: true, force: true }); } catch { /* egal */ }
+    settings.sftpLast = { ...(settings.sftpLast || {}), id, exportDir: remoteDir }; saveSettings();
+    return r;
+  });
+  handle('sftp:pickKey', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Privaten Schlüssel wählen (z. B. id_ed25519 oder .ppk → vorher in OpenSSH umwandeln)', properties: ['openFile', 'showHiddenFiles'], defaultPath: path.join(os.homedir(), '.ssh') });
+    return r.canceled ? null : r.filePaths[0];
   });
 
   // Einrichtung: GTA, Blender, Sollumz automatisch suchen
@@ -930,6 +966,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   loadSettings();
+  sftp.init({ getSettings: () => settings, saveSettings, safeStorage, send: (c, d) => send(c, d), tempRoot: TEMP_ROOT, log: logLine });
   cleanupOldSessions();
   startBackend();
   registerIpc();
@@ -945,6 +982,7 @@ app.on('before-quit', () => { app.isQuitting = true; });
 app.on('window-all-closed', () => {
   app.isQuitting = true;
   cleanupAllSessions();
+  sftp.closeAll();
   for (const s of blenderSessions.values()) { /* Blender bleibt offen – Nutzer entscheidet */ void s; }
   try { backend && backend.stdin.end(); } catch { /* egal */ }
   app.quit();

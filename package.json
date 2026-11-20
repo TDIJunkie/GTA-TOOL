@@ -1,7 +1,7 @@
 {
   "name": "gta-tool",
   "productName": "GTA Tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GTA Tool – GTA-V-Fahrzeuge, Kleidung, MLOs und Animationen bearbeiten und als FiveM-Resource exportieren",
   "main": "app/main.js",
   "author": "TDIJunkie",
@@ -72,10 +72,12 @@
         "repo": "GTA-TOOL",
         "releaseType": "release"
       }
-    ]
+    ],
+    "npmRebuild": false
   },
   "dependencies": {
-    "electron-updater": "6.8.11"
+    "electron-updater": "6.8.11",
+    "ssh2-sftp-client": "11.0.0"
   },
   "repository": {
     "type": "git",

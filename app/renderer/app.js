@@ -131,6 +131,7 @@ const App = {
         pathField('blenderPath', 'Blender (blender.exe)', 'Blender 4.2 oder neuer mit installiertem Sollumz-Add-on. Wird automatisch gesucht.', 'exe'),
         pathField('audioEditor', 'Audioprogramm (z. B. Audacity, optional)', 'Wird beim Bearbeiten von Sounds geöffnet. Leer = Windows-Standardprogramm für WAV.', 'exe'),
         pathField('imageEditor', 'Bildprogramm (Paint.NET)', 'Wird bei „Ersetzen“ und „Bearbeiten“ geöffnet. Paint.NET wird automatisch erkannt.', 'exe'),
+        h('div.section', h('div.section-head', h('h3', 'SFTP-Server')), h('p.muted.small', 'Server für Import und Export per SFTP (z. B. dein FiveM-Server).'), h('button.btn.small', { onclick: () => Sftp.manage() }, '🌐 Server verwalten')),
         h('div.section', h('div.section-head', h('h3', 'Updates')), updBox,
           h('p.muted.small', 'Updates werden beim Start automatisch gesucht und im Hintergrund geladen.')),
       ),
@@ -190,6 +191,8 @@ window.api.on('app:closing', async () => {
 document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
   if (go && !go.disabled) App.go(go.dataset.goto);
+  const sf = e.target.closest('[data-sftp-open]');
+  if (sf) Sftp.importTo({ vehicles: VehicleStudio, clothing: ClothingStudio, mlo: MloStudio, anim: AnimStudio }[sf.dataset.sftpOpen], false);
   const act = e.target.closest('[data-action="settings"]');
   if (act) App.openSettings();
 });

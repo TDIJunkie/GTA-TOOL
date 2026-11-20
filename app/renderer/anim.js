@@ -83,6 +83,7 @@ const AnimStudio = (() => {
       title: 'Weitere Animationen hinzufügen',
       body: h('p.muted', 'Die Dateien kommen zu den bereits geöffneten dazu.'),
       buttons: [
+        { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(AnimStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) },
         { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('animfiles', true) },
       ],
@@ -533,35 +534,36 @@ const AnimStudio = (() => {
     const nameIn = h('input', { type: 'text', value: defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const testCmd = h('input', { type: 'checkbox', checked: true });
+    const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
+      onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; },
+    }, 'Durchsuchen …')));
+    const target = Sftp.targetField(localField, dirIn);
     modal({
       title: 'Animationen als FiveM-Resource exportieren',
       body: h('div',
         h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit allen .ycd-Dateien, fxmanifest.lua und LIESMICH.txt mit allen Datei- und Clip-Namen.'),
         h('div.field', h('label', 'Name der Resource'), nameIn),
-        h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
-          onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; },
-        }, 'Durchsuchen …'))),
+        target.el,
+        localField,
         h('label.check', testCmd, ' Test-Befehl einbauen (', h('code', '/animtest datei clip'), ' und ', h('code', '/animstop'), ')')),
       buttons: [
         { label: 'Abbrechen' },
         {
           label: '📦 Exportieren', primary: true,
           onClick: async () => {
-            if (!dirIn.value.trim()) { toast('Bitte einen Zielordner wählen.', 'warn'); return true; }
-            if (await call('fivem:exists', { outDir: dirIn.value.trim(), resourceName: nameIn.value.trim() })) {
-              if (!await UI.confirm('Überschreiben?', 'Eine Resource mit diesem Namen existiert dort schon. Überschreiben?', 'Überschreiben', { danger: true })) return true;
-            }
-            const r = await call('anim:export', { outDir: dirIn.value.trim(), resourceName: nameIn.value.trim(), testCommand: testCmd.checked }, { busyText: 'Resource wird erstellt …' });
+            const resourceName = nameIn.value.trim();
+            const r = await Sftp.runExport(target.get(), resourceName,
+              (outDir) => call('anim:export', { outDir, resourceName, testCommand: testCmd.checked }, { busyText: 'Resource wird erstellt …' }));
             if (!r) return true;
             S.dirty = false; updateStatus();
             modal({
               title: '✓ Export fertig',
-              body: h('div', h('p', h('code', r.folder)),
+              body: h('div', Sftp.resultPath(r),
                 h('p', `${r.files} Animations-Datei(en) · ${r.clips} Clips`),
                 r.warnings.length ? h('div.notice.warn', h('ul', r.warnings.map((w) => h('li', w)))) : null,
-                h('div.notice.info', 'Ordner nach „resources“ kopieren → server.cfg: ', h('code', `ensure ${base(r.folder)}`),
+                h('div.notice.info', r.remote ? 'server.cfg: ' : 'Ordner nach „resources“ kopieren → server.cfg: ', h('code', `ensure ${base(r.folder)}`),
                   testCmd.checked ? h('span', ' · Im Spiel testen: ', h('code', '/animtest datei clip')) : null)),
-              buttons: [{ label: 'Schließen' }, { label: '📂 Ordner öffnen', primary: true, onClick: () => call('shell:open', { target: r.folder }) }],
+              buttons: Sftp.resultButtons(r),
             });
             return false;
           },

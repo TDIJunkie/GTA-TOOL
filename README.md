@@ -19,6 +19,10 @@ Das GTA Tool ist ein Windows-Programm, mit dem du GTA-V-Inhalte öffnen, ansehen
 
 Jeder Export ist eine fertige Resource (`fxmanifest.lua`, `stream/`, `data/` …), die direkt auf dem Server gestartet werden kann (`ensure <name>`).
 
+### 🌐 Direkt mit dem Server arbeiten (SFTP)
+
+In jedem Bereich kannst du Dateien und Ordner **direkt von deinem Server laden** („🌐 Vom Server (SFTP)“) und die fertige Resource **direkt auf den Server exportieren** (im Export-Dialog „Server (SFTP)“ wählen). Server legst du unter ⚙ Einstellungen → „SFTP-Server“ an – mit Passwort oder Schlüsseldatei. Zugangsdaten werden verschlüsselt mit Windows gespeichert, der Sicherheitsschlüssel des Servers wird geprüft.
+
 ### Voraussetzungen
 
 - **Windows 10/11 (64 Bit)**
@@ -59,6 +63,10 @@ GTA Tool is a Windows application for opening, viewing, editing and exporting GT
 | 🕺 **Animations** | Play `.ycd` animations on the freemode body · rename, duplicate, change speed and length, copy between files · edit in Blender · Lua sample code · export with test command `/animtest` |
 
 Every export is a complete resource (`fxmanifest.lua`, `stream/`, `data/` …) that can be started on a server right away (`ensure <name>`).
+
+### 🌐 Work directly with your server (SFTP)
+
+In every studio you can **load files and folders straight from your server** (“🌐 Vom Server (SFTP)”) and **export the finished resource straight to the server** (choose “Server (SFTP)” in the export dialog). Add servers under ⚙ Einstellungen → “SFTP-Server” – with password or key file. Credentials are stored encrypted by Windows and the server’s host key is verified.
 
 ### Requirements
 
@@ -115,4 +123,5 @@ Aufbau / structure: `app/` Electron-Oberfläche (UI), `backend/` .NET-Backend (G
 - [DirectXTex / texconv](https://github.com/microsoft/DirectXTex) (MIT) – Texturumwandlung
 - [three.js](https://threejs.org) (MIT) – 3D-Ansicht
 - [electron-updater](https://www.electron.build/auto-update) (MIT) – automatische Updates
+- [ssh2-sftp-client](https://github.com/theophilusx/ssh2-sftp-client) / [ssh2](https://github.com/mscdex/ssh2) (Apache-2.0 / MIT) – SFTP
 - [Sollumz](https://github.com/Sollumz/Sollumz) – Blender-Add-on (nicht enthalten, wird vom Nutzer installiert / not bundled)
