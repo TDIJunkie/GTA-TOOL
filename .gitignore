@@ -1,0 +1,22 @@
+# Abhängigkeiten und Build-Ergebnisse
+node_modules/
+dist/
+build/
+backend/**/bin/
+backend/**/obj/
+vendor/**/bin/
+vendor/**/obj/
+vendor/**/.vs/
+*.user
+
+# Python
+__pycache__/
+*.pyc
+
+# Lokales
+.claude/
+*.log
+.env
+.env.*
+Thumbs.db
+desktop.ini

@@ -1,0 +1,84 @@
+{
+  "name": "gta-tool",
+  "productName": "GTA Tool",
+  "version": "0.1.0",
+  "description": "GTA Tool – GTA-V-Fahrzeuge, Kleidung, MLOs und Animationen bearbeiten und als FiveM-Resource exportieren",
+  "main": "app/main.js",
+  "author": "TDIJunkie",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/build-backend.js --dev && electron .",
+    "build": "node scripts/build.js",
+    "build:installer": "node scripts/build.js --installer",
+    "release": "node scripts/build.js --installer --publish"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0",
+    "three": "0.187.0"
+  },
+  "build": {
+    "appId": "de.gtatool.app",
+    "productName": "GTA Tool",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/backend",
+        "to": "backend"
+      },
+      {
+        "from": "tools/texconv.exe",
+        "to": "tools/texconv.exe"
+      },
+      {
+        "from": "blender",
+        "to": "blender",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/renderer/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "GTA Tool",
+      "include": "scripts/installer.nsh",
+      "artifactName": "GTA-Tool-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "TDIJunkie",
+        "repo": "GTA-TOOL",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TDIJunkie/GTA-TOOL.git"
+  }
+}
