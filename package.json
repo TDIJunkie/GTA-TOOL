@@ -9,8 +9,7 @@
   "scripts": {
     "start": "node scripts/build-backend.js --dev && electron .",
     "build": "node scripts/build.js",
-    "build:installer": "node scripts/build.js --installer",
-    "release": "node scripts/build.js --installer --publish"
+    "build:installer": "node scripts/build.js --installer"
   },
   "devDependencies": {
     "electron": "45.3.4",
@@ -63,7 +62,8 @@
       "createDesktopShortcut": true,
       "shortcutName": "GTA Tool",
       "include": "scripts/installer.nsh",
-      "artifactName": "GTA-Tool-Setup-${version}.${ext}"
+      "artifactName": "GTA-Tool-Setup-${version}.${ext}",
+      "differentialPackage": false
     },
     "publish": [
       {

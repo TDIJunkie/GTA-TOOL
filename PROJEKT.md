@@ -243,7 +243,8 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
       sonst Installation beim Beenden. Nur in der installierten Version (nicht win-unpacked).
 - **Release veröffentlichen:** Version in `package.json` erhöhen → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`.
   GitHub Actions (`.github/workflows/release.yml`) baut den Installer und lädt `GTA-Tool-Setup-X.Y.Z.exe` + `latest.yml` hoch.
-  Lokal alternativ: `GH_TOKEN=… npm run release`. **Installer/Release nur nach Freigabe durch den Nutzer.**
+  Der Workflow legt genau ein Release an (Setup-EXE + `latest.yml`, Text aus `.github/release-notes.md`), keine Blockmap
+  (`differentialPackage: false` → Updates laden immer das ganze Setup). **Release nur nach Freigabe durch den Nutzer.**
 - Wichtig: Für Updates bei anderen Nutzern muss das Repo (bzw. die Releases) **öffentlich** sein.
 
 ### Offen / nächste Schritte

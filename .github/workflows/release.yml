@@ -1,11 +1,17 @@
-# Baut den Installer und veröffentlicht ihn als GitHub-Release, sobald ein Versions-Tag (z. B. v0.2.0) gepusht wird.
-# Die installierten GTA-Tool-Versionen finden das Release automatisch (electron-updater, latest.yml).
+# Baut den Installer und veröffentlicht genau EIN GitHub-Release, sobald ein Versions-Tag (z. B. v0.2.0) gepusht wird.
+# Die installierten GTA-Tool-Versionen finden das Release automatisch über latest.yml (electron-updater).
+# Erneut ausführen (z. B. Release reparieren): Actions → Release → „Run workflow“ mit dem Tag.
 name: Release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag, z. B. v0.1.0'
+        required: true
 
 permissions:
   contents: write
@@ -13,9 +19,12 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           submodules: true
 
       - uses: actions/setup-node@v4
@@ -31,12 +40,23 @@ jobs:
         shell: pwsh
         run: |
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          if ($pkg -ne $tag) { throw "Tag v$tag passt nicht zur Version $pkg in package.json" }
+          if ($pkg -ne $env:TAG.TrimStart('v')) { throw "Tag $env:TAG passt nicht zur Version $pkg in package.json" }
+          "VERSION=$pkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - run: npm ci
 
-      - name: Installer bauen und veröffentlichen
-        run: npm run release
+      - name: Installer bauen
+        run: npm run build:installer
+
+      - name: Release veröffentlichen
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $repo = "${{ github.repository }}"
+          # Alte Releases zu diesem Tag entfernen (der Tag selbst bleibt)
+          $ids = gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name == `"$env:TAG`") | .id"
+          foreach ($id in $ids) { if ($id) { gh api -X DELETE "repos/$repo/releases/$id" } }
+          $notes = (Get-Content .github/release-notes.md -Raw).Replace('{version}', $env:VERSION)
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+          gh release create $env:TAG "dist/GTA-Tool-Setup-$env:VERSION.exe" "dist/latest.yml" --repo $repo --title "GTA Tool $env:VERSION" --notes-file notes.md --latest

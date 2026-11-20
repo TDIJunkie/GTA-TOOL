@@ -1,20 +1,18 @@
 // npm run build            → dist/win-unpacked (immer!)
 // npm run build:installer  → zusätzlich Installer-EXE (nur nach Freigabe durch den Nutzer)
-// npm run release          → Installer bauen und als GitHub-Release hochladen (GH_TOKEN nötig; sonst über GitHub Actions per Tag)
+// Veröffentlichen: Versions-Tag pushen → GitHub Actions (.github/workflows/release.yml)
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
 const installer = process.argv.includes('--installer');
-const publish = process.argv.includes('--publish');
-if (publish && !process.env.GH_TOKEN) { console.error('Für --publish muss GH_TOKEN gesetzt sein (GitHub-Token mit Schreibrecht auf Releases).'); process.exit(1); }
 const run = (cmd) => execSync(cmd, { stdio: 'inherit', cwd: root });
 
 run('node scripts/build-backend.js');
 
 console.log(`> Electron-Paket wird gebaut (${installer ? 'win-unpacked + Installer' : 'win-unpacked'}) …`);
-run(`npx electron-builder --win ${installer ? '' : '--dir'} --x64 --publish ${publish ? 'always' : 'never'}`);
+run(`npx electron-builder --win ${installer ? '' : '--dir'} --x64 --publish never`);
 
 // Verknüpfung „Vehicle Studio“ (startet direkt ohne Startoberfläche)
 const unpacked = path.join(root, 'dist', 'win-unpacked');
