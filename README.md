@@ -14,7 +14,8 @@ Das GTA Tool ist ein Windows-Programm, mit dem du GTA-V-Inhalte öffnen, ansehen
 | --- | --- |
 | 🚗 **Fahrzeuge** | Addon- und Replace-Fahrzeuge aus `dlc.rpf`, Ordnern oder Einzeldateien öffnen · Tuningteile, Felgen und Texturen erkennen · 3D-Vorschau mit anbaubaren Tuningteilen · Folierungen (Liveries) erstellen und bearbeiten · Motorsounds abspielen, ersetzen, exportieren · Replace in Addon umwandeln, Namen ändern · Modelle in Blender bearbeiten |
 | 👕 **Kleidung** | Freemode-Kleidung (männlich/weiblich) auf dem Charakter in 3D · Position und Größe anpassen · Texturvarianten · männlich ⇄ weiblich umwandeln · Addon ⇄ Replace · Original-GTA-Kleidung als Vorlage · Blender |
-| 🏠 **MLO / Interiors** | Objekte in 3D verschieben, drehen, einfügen, löschen · GTA-Objektkatalog · Texturen · Kollisionen anzeigen · Platzierung in der Welt · Blender |
+| 🏠 **MLO / Interiors** | Objekte in 3D verschieben, drehen, einfügen, löschen · GTA-Objektkatalog · Texturen · Kollisionen anzeigen · **neue Interiors erstellen**: Ort auf der GTA-Karte wählen, in der echten 3D-Umgebung platzieren, in Blender mit Räumen, Portalen und Türen bauen · Blender |
+| 🪑 **Props / Objekte** | Eigene Props öffnen (.ydr/.yft) · 3D und Kollision · Texturen bearbeiten · Archetypen (.ytyp) automatisch · umbenennen, Sichtweite · GTA-Objekt als Vorlage · **komplett neue Props in Blender modellieren** · Export mit `/spawnprop` |
 | 🕺 **Animationen** | `.ycd`-Animationen auf dem Freemode-Körper abspielen · umbenennen, duplizieren, Tempo und Länge ändern, zwischen Dateien kopieren · in Blender bearbeiten · Lua-Beispielcode · Export mit Test-Befehl `/animtest` |
 
 Jeder Export ist eine fertige Resource (`fxmanifest.lua`, `stream/`, `data/` …), die direkt auf dem Server gestartet werden kann (`ensure <name>`).
@@ -59,7 +60,8 @@ GTA Tool is a Windows application for opening, viewing, editing and exporting GT
 | --- | --- |
 | 🚗 **Vehicles** | Open add-on and replace vehicles from `dlc.rpf`, folders or single files · detect tuning parts, wheels and textures · 3D preview with attachable tuning parts · create and edit liveries · play, replace and export engine sounds · convert replace → add-on, rename · edit models in Blender |
 | 👕 **Clothing** | Freemode clothing (male/female) in 3D on the character · adjust position and scale · texture variants · convert male ⇄ female · add-on ⇄ replace · use original GTA clothing as a base · Blender |
-| 🏠 **MLO / Interiors** | Move, rotate, insert and delete objects in 3D · GTA object catalog · textures · show collisions · world placement · Blender |
+| 🏠 **MLO / Interiors** | Move, rotate, insert and delete objects in 3D · GTA object catalog · textures · show collisions · **create new interiors**: pick a spot on the GTA map, place it in the real 3D surroundings, build it in Blender with rooms, portals and doors · Blender |
+| 🪑 **Props / Objects** | Open custom props (.ydr/.yft) · 3D and collision · edit textures · archetypes (.ytyp) created automatically · rename, view distance · GTA object as a template · **model completely new props in Blender** · export with `/spawnprop` |
 | 🕺 **Animations** | Play `.ycd` animations on the freemode body · rename, duplicate, change speed and length, copy between files · edit in Blender · Lua sample code · export with test command `/animtest` |
 
 Every export is a complete resource (`fxmanifest.lua`, `stream/`, `data/` …) that can be started on a server right away (`ensure <name>`).

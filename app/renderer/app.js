@@ -15,10 +15,11 @@ const App = {
     if (view === 'clothing') ClothingStudio.show();
     if (view === 'mlo') MloStudio.show();
     if (view === 'anim') AnimStudio.show();
+    if (view === 'prop') PropStudio.show();
   },
 
   renderKeys() {
-    for (const id of ['keys-badge', 'keys-badge-2', 'keys-badge-3', 'keys-badge-4', 'keys-badge-5']) {
+    for (const id of ['keys-badge', 'keys-badge-2', 'keys-badge-3', 'keys-badge-4', 'keys-badge-5', 'keys-badge-6']) {
       const b = document.getElementById(id);
       b.className = 'badge ' + (this.keys.loaded ? 'ok' : 'bad');
       b.textContent = this.keys.loaded ? '✓ GTA-Schlüssel geladen' : '⚠ GTA-Schlüssel fehlen';
@@ -170,7 +171,7 @@ window.api.on('update', (u) => {
       body: h('div',
         h('p', 'Eine neue Version des GTA Tools wurde heruntergeladen.'),
         h('p.muted', 'Jetzt neu starten installiert das Update sofort. Bei „Später“ wird es beim nächsten Beenden installiert.'),
-        (VehicleStudio.dirty || ClothingStudio.dirty || MloStudio.dirty || AnimStudio.dirty)
+        (VehicleStudio.dirty || ClothingStudio.dirty || MloStudio.dirty || AnimStudio.dirty || PropStudio.dirty)
           ? h('div.notice.warn', 'Achtung: Du hast nicht exportierte Änderungen – vor dem Neustart bitte exportieren.') : null),
       buttons: [
         { label: 'Später' },
@@ -181,7 +182,7 @@ window.api.on('update', (u) => {
 });
 window.api.on('toast', (d) => toast(d.text, d.type || 'ok'));
 window.api.on('app:closing', async () => {
-  if (VehicleStudio.dirty || ClothingStudio.dirty || MloStudio.dirty || AnimStudio.dirty) {
+  if (VehicleStudio.dirty || ClothingStudio.dirty || MloStudio.dirty || AnimStudio.dirty || PropStudio.dirty) {
     const ok = await UI.confirm('Beenden?', 'Du hast Änderungen, die noch nicht als FiveM-Resource exportiert wurden. Trotzdem beenden? Die Änderungen gehen verloren.', 'Beenden', { danger: true });
     if (!ok) return;
   }
@@ -192,7 +193,7 @@ document.addEventListener('click', (e) => {
   const go = e.target.closest('[data-goto]');
   if (go && !go.disabled) App.go(go.dataset.goto);
   const sf = e.target.closest('[data-sftp-open]');
-  if (sf) Sftp.importTo({ vehicles: VehicleStudio, clothing: ClothingStudio, mlo: MloStudio, anim: AnimStudio }[sf.dataset.sftpOpen], false);
+  if (sf) Sftp.importTo({ vehicles: VehicleStudio, clothing: ClothingStudio, mlo: MloStudio, anim: AnimStudio, prop: PropStudio }[sf.dataset.sftpOpen], false);
   const act = e.target.closest('[data-action="settings"]');
   if (act) App.openSettings();
 });
@@ -208,6 +209,7 @@ window.addEventListener('drop', (e) => e.preventDefault());
   ClothingStudio.init();
   MloStudio.init();
   AnimStudio.init();
+  PropStudio.init();
   App.go(info ? info.startView : 'start');
   if (info && info.startFiles && info.startFiles.length) {
     App.go('vehicles');

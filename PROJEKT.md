@@ -262,6 +262,76 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
   Übertragung schonend (4 parallele Anfragen), bei Fehler Neuverbindung + sequenziell (Fix für „No response from server“ beim Nutzer).
   Schlüsseldatei-Anmeldung noch ungetestet.
 
+### Stand 20.11.2026 (4) – Prop Studio (Version 0.3.0)
+
+Start: Kachel „Props / Objekte“ oder `GTA Tool.exe --prop-studio` (`Prop Studio.lnk`). Sitzung `sessions.prop`.
+Backend `PropPack.cs`, Oberfläche `props.js`.
+
+- [x] **Import**: Ordner/Dateien/Drag & Drop/RPF/SFTP – .ydr, .yft (+ _hi), .ytd, .ybn, .ytyp. Zuordnung Modell ↔ Archetyp
+      (name/assetName) ↔ Texturdatei (txd bzw. gleichnamige .ytd) ↔ eigene .ybn. Hinweise: Archetypen ohne Modell, MLO im Paket.
+- [x] **Ansicht**: 3D (Modell / Kollision umschaltbar; Kollision auch eingebettet aus .ydr/.yft – `Mlo.LoadBounds`),
+      Größe, Kollision ja/nein, Sichtweite, Texturdateien; Lua-Spawn-Code zum Kopieren.
+- [x] **Archetypen**: fehlende automatisch anlegen (vorhandene Nicht-MLO-.ytyp oder neue `<name>.ytyp`; BBox aus dem Modell,
+      Fragment/Drawable, Sichtweite 150 m), beim Export immer automatisch. Sichtweite ändern.
+- [x] **Bearbeiten**: Umbenennen (Modell, _hi, .ybn, eigene .ytd, Archetyp), Löschen (Textur nur wenn ungenutzt), Modell ersetzen.
+- [x] **Texturen**: eingebettet + .ytd – Bearbeiten (Paint.NET, Auto-Übernahme), Datei …, Export PNG/DDS, Importieren, Löschen.
+- [x] **Blender** (.ydr/.yft/.ybn) über `mlo:blender` mit Parameter `studio: 'prop'`.
+- [x] **Aus GTA-Objekt erstellen**: Katalogsuche + 3D-Vorschau, Kopie unter eigenem Namen (Modell + .ytd) + Archetyp.
+- [x] **Export**: stream + `data_file 'DLC_ITYP_REQUEST' 'stream/x.ytyp'`, LIESMICH, optional `/spawnprop <name>` und `/delprops`; SFTP-Ziel.
+- Getestet: Backend (Archetyp anlegen in vorhandener und neuer .ytyp, umbenennen, Sichtweite, löschen, Export),
+  Oberfläche (GTA-Stuhl übernehmen, 3D, Kollision, eigenes Modell ohne Archetyp, Export). **Im Spiel noch ungetestet.**
+  Blender für Props nicht erneut getestet (gleicher Weg wie MLO-.ydr). Archetyp-Flags = 0.
+- [x] **Neues Prop in Blender** („✨ Neu in Blender“): Bridge `--new-prop <name>` startet mit Würfel „Form“ (Ursprung unten),
+      Anleitung im Panel. „Speichern & zurück“: sichtbare Meshes werden kopiert (Modifikatoren angewendet, Weltlage eingebacken,
+      Materialien kopiert, Farbe ohne Bild → 16×16-Farbtextur, fehlende UVs → Smart UV, „UVMap 0“ + weiße „Color 1“),
+      Sollumz `autoconvertmaterials` + `converttodrawable` mit eingebetteter Kollision (Material CONCRETE), Export NATIVE .ydr;
+      Kopien werden danach wieder gelöscht → beliebig oft zurückschicken. Sollumz nimmt den Texturnamen aus dem Bild-Dateinamen
+      und bettet nur DDS ein → Bilder werden nach `out\texturen\<name>.png` gelegt, Nodes bekommen Bild-Kopien mit diesem Pfad.
+      Backend `prop.applyNew`: .ydr ins Paket, Bilder → `<name>.ytd` (texconv), Archetyp anlegen/aktualisieren (BBox, txd).
+      Headless getestet (`--auto-export --test-model`): Bevel-Würfel rot + Zylinder → 2 Texturen, Kollision, Archetyp, 3D korrekt.
+
+### Stand 20.11.2026 (5) – Neues Interior (MLO) mit Karte und Blender (Version 0.3.0)
+
+- [x] **Karte** (`MapView.cs`, `map.build` → `%APPDATA%\GTA Tool\karte2.glb`): Radar-Geometrie aus
+      `x64e.rpf\levels\gta5\minimap.rpf\*.ydd` (65 Kacheln, ~145 000 Dreiecke, echte Weltkoordinaten, Vertexfarben, unbeleuchtet).
+      Höhe der Geometrie bleibt als Ebenen-Reihenfolge erhalten (sonst überdecken Grundflächen die Straßen).
+      Viewer-Kartenmodus (`mapShow/mapHide/mapSetMarker/mapOn`): Draufsicht, Norden oben, Ziehen = verschieben, Klick = Position,
+      Marker = Grundriss (Breite × Tiefe, Drehung) + Nadel.
+- [x] **Bodenhöhe** (`map.height`): heightmap.dat (update.rpf, sonst common.rpf), CodeWalker `HeightmapFile`, Zeile von BBMin.Y
+      aus (geprüft: Chiliad 800 m, Flughafen 16 m, Vinewood-Schild 349 m). Vorschlag = Min-Höhe der Zelle (Max = Dächer).
+- [x] **Dialog „✨ Neues Interior“** (MLO Studio: Startfläche, Übersicht, Hinzufügen): Name, Karte, X/Y/Z, Drehung, Größe,
+      Koordinaten einfügen (`vector3(...)`).
+- [x] **Blender-Modus** `--new-mlo <name> --pos x,y,z --heading h --size w,d,h --doors tueren.json --blend-save …`:
+      Vorlage (Boden, 4 Wände mit Türöffnung, Decke) in Sammlungen „Gebäude“, „Räume“ (Draht-Boxen), „Portale“ (Rahmen),
+      „Türen“ (Platzhalter in Originalgröße, Drehpunkt = Scharnier, Unterkante auf Boden; Liste aus dem Objektkatalog `mlo.doorList`).
+      Panel-Knöpfe: Raum / Portal hinzufügen, Tür einfügen. Export: Hülle → `<name>_shell.ydr` (+ Texturen), Kollision →
+      `<name>_col.ybn` **in Weltkoordinaten** (Platzierung + Drehung eingebacken), `mlo.json` (Räume = Welt-BBox, Portale = 4 Ecken in
+      GTA-Reihenfolge, Raum-Zuordnung über Normale ±0,3 m, Türen an nächstes Portal). Blend wird unter
+      `%APPDATA%\GTA Tool\blender-quellen\<name>.blend` gespeichert → „In Blender weiterbearbeiten“ (öffnet die .blend).
+- [x] **Backend `MloCreate.ApplyNew`**: YTYP (Hülle-Archetyp + MLO mit limbo + Räumen, Portalen, Türen, Timecycles wie
+      funktionierendes Custom-MLO) und YMAP (CMloInstanceDef) per CodeWalker-XML → binär; Drehung + Extents über `Mlo.SetPlacement`.
+      Vom Tool erzeugte Objekte haben GUIDs `0x6A7A0000+i`; alle anderen (im MLO Studio eingefügten) bleiben beim erneuten Zurückschicken erhalten.
+- Getestet headless: Vorlage + Anbau (2 Räume, 2 Portale, 1 Tür), Kollision liegt am Flughafen in Weltkoordinaten,
+  MLO Studio liest es ein (3D, Räume, Platzierung), eingefügter Stuhl bleibt beim Neuaufbau erhalten; Karte/Klick/Höhe/Einfügen über die Oberfläche.
+  **Blender-Fenster selbst (Panel, Knöpfe) und das Interior im Spiel sind ungetestet.** Wird die Platzierung im MLO Studio geändert,
+  muss die Kollision über „In Blender weiterbearbeiten“ neu erzeugt werden.
+
+### Stand 20.11.2026 (6) – 3D-Platzieren in der echten GTA-Welt (Version 0.3.0)
+
+- [x] **Welt-Index** (`World.cs`, `world.build` → `%APPDATA%\GTA Tool\gta-welt.json`): alle YMAPs mit HD-/ORPHANHD-Objekten
+      (x64*.rpf, dlcpacks, update.rpf – spätere ersetzen gleichnamige), Bereich je YMAP. 6 222 YMAPs, ~15 s einmalig.
+- [x] **Umgebung** (`world.area`): HD-Objekte im Umkreis (60–300 m, max. 1 500, nächste zuerst), tatsächliche Ausrichtung über
+      CodeWalker (`YmapEntityDef.Orientation`), Duplikate (gleiche Stelle aus mehreren YMAPs) gefiltert. Modelle über den Objektkatalog
+      als GLB mit 128-px-Texturen (`Model3D.TextureLimit`), Cache `%APPDATA%\GTA Tool\gta-objekte-glb\`; .ydd-Pakete übersprungen.
+- [x] **Viewer-Weltmodus** (`worldShow/worldAdd/worldSetObject/worldModeSet/worldSnap/worldSetValues/worldHide`): alles relativ zum
+      Ursprung, Objekt = rote Box (neues Interior, Pfeil = Eingang) oder Klon der geladenen MLO-Szene; TransformControls
+      (Verschieben; Drehen nur um die Hochachse), „Auf den Boden setzen“ per Strahl nach unten.
+- [x] **Dialog** `placement.js` (`WorldPlace.open`): Umkreis, Modus, Boden, Zahlenfelder in beide Richtungen.
+      Eingebunden in „Neues Interior“ („🎯 In 3D genau platzieren“) und im Platzierungsbereich bestehender Interiors
+      („🎯 In der Welt platzieren (3D)“ → speichert YMAP; bei Tool-Interiors Hinweis, die Kollision über Blender neu zu erzeugen).
+- Getestet (unsichtbar): Index + Umgebung am Flughafen in 16 s (643 Objekte), Boden-Einrasten, Drehung 75° gespeichert.
+  Viele Umgebungsobjekte erscheinen ohne Textur (gemeinsame GTA-Texturdateien werden nicht geladen) – reicht zur Orientierung.
+
 ### Offen / nächste Schritte
 
 - [ ] Animation Studio: neue Animation in Blender von Grund auf erstellen; Clip-Tags/Eigenschaften bearbeiten;

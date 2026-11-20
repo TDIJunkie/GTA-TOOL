@@ -137,6 +137,8 @@ public static class DebugInfo
             all = d.AllModels?.Length,
             bones = d.Skeleton?.Bones?.Items?.Select(b => b.Name).ToList(),
             lodDist = new[] { d.LodDistHigh, d.LodDistMed, d.LodDistLow, d.LodDistVlow },
+            shaders = d.ShaderGroup?.Shaders?.data_items?.Select(sh => new { name = sh.Name.ToString(), file = sh.FileName.ToString(), tex = sh.ParametersList?.Parameters?.Select((p, i) => p.Data is TextureBase tb ? $"{(MetaHash)(uint)sh.ParametersList.Hashes[i]}={tb.Name}" : null).Where(x => x != null).ToList() }).ToList(),
+            embedded = d.ShaderGroup?.TextureDictionary?.Textures?.data_items?.Length ?? 0,
         };
     }
 }
@@ -171,5 +173,42 @@ public static class DebugSkel
             if (dev > 0.01f) res.Add(new { i, name = bones[i].Name, parent = bones[i].ParentIndex, dev, t = new[] { prod.M41, prod.M42, prod.M43 }, raw = new[] { inv[i].M14, inv[i].M24, inv[i].M34, inv[i].M44 } });
         }
         return new { bones = n, invCount = inv?.Length ?? 0, parentsOrdered = bones.Select((b, i) => b.ParentIndex < i).All(x => x), deviating = res.Count, list = res.Take(40) };
+    }
+}
+
+public static class DebugXml
+{
+    /// <summary>Beliebige Meta-Datei (.ytyp/.ymap/.ymt …) als CodeWalker-XML.</summary>
+    public static object ToXml(string file, string outFile)
+    {
+        var data = File.ReadAllBytes(file);
+        var entry = CodeWalker.GameFiles.RpfFile.CreateResourceFileEntry(ref data, 0);
+        entry.Name = Path.GetFileName(file);
+        entry.NameLower = entry.Name.ToLowerInvariant();
+        data = CodeWalker.GameFiles.ResourceBuilder.Decompress(data);
+        var xml = CodeWalker.GameFiles.MetaXml.GetXml(entry, data, out _);
+        File.WriteAllText(outFile, xml);
+        return new { outFile, length = xml?.Length ?? 0 };
+    }
+}
+
+public static class DebugYdd
+{
+    public static object Info(string file)
+    {
+        var y = new CodeWalker.GameFiles.YddFile(); y.Load(File.ReadAllBytes(file));
+        return y.Drawables.Select(d => new
+        {
+            name = d.Name,
+            models = d.AllModels?.Length,
+            geos = d.AllModels?.SelectMany(m => m.Geometries ?? Array.Empty<CodeWalker.GameFiles.DrawableGeometry>()).Take(6).Select(g => new
+            {
+                flags = g.VertexData?.Info?.Flags,
+                verts = g.VertexData?.VertexCount,
+                shader = g.Shader?.Name.ToString(),
+                c0 = g.VertexData != null && (g.VertexData.Info.Flags & 16) != 0 ? g.VertexData.GetColour(0, 4).ToString() : null,
+                c1 = g.VertexData != null && (g.VertexData.Info.Flags & 16) != 0 && g.VertexData.VertexCount > 50 ? g.VertexData.GetColour(50, 4).ToString() : null,
+            }).ToList(),
+        }).Take(5).ToList();
     }
 }

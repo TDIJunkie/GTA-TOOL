@@ -254,13 +254,37 @@ public static class Mlo
     // ------------------------------------------------------------------ Kollision
 
     /// <summary>Kollision (.ybn) als halbtransparentes GLB, optional in den MLO-Raum umgerechnet.</summary>
+    /// <summary>Kollision aus .ybn oder eingebettet in .ydr (Drawable.Bound) / .yft (Physik-LOD).</summary>
+    public static Bounds LoadBounds(string file)
+    {
+        var data = File.ReadAllBytes(file);
+        switch (Path.GetExtension(file).ToLowerInvariant())
+        {
+            case ".ydr":
+            {
+                var y = new YdrFile(); y.Load(data);
+                return y.Drawable?.Bound ?? throw new UserError("Dieses Modell hat keine eingebettete Kollision.");
+            }
+            case ".yft":
+            {
+                var y = new YftFile(); y.Load(data);
+                var f = y.Fragment;
+                return f?.PhysicsLODGroup?.PhysicsLOD1?.Bound ?? f?.Drawable?.Bound ?? throw new UserError("Dieses Modell hat keine eingebettete Kollision.");
+            }
+            default:
+            {
+                var y = new YbnFile(); y.Load(data);
+                return y.Bounds;
+            }
+        }
+    }
+
     public static object CollisionGlb(string ybnFile, string outFile, float[] mloPos, float[] mloRot, float[] clipMin = null, float[] clipMax = null)
     {
         Vector3? cMin = clipMin != null ? new Vector3(clipMin[0], clipMin[1], clipMin[2]) - new Vector3(1f) : null;
         Vector3? cMax = clipMax != null ? new Vector3(clipMax[0], clipMax[1], clipMax[2]) + new Vector3(1f) : null;
         bool Inside(Vector3 v) => cMin == null || (v.X >= cMin.Value.X && v.Y >= cMin.Value.Y && v.Z >= cMin.Value.Z && v.X <= cMax.Value.X && v.Y <= cMax.Value.Y && v.Z <= cMax.Value.Z);
-        var ybn = new YbnFile();
-        ybn.Load(File.ReadAllBytes(ybnFile));
+        var rootBounds = LoadBounds(ybnFile);
         var pts = new List<Vector3>();
         var tris = new List<int>();
         Matrix toLocal = Matrix.Identity;
@@ -311,7 +335,7 @@ public static class Mlo
             if (b is BoundBox || b is BoundSphere || b is BoundCapsule || b is BoundCylinder)
                 Box(b.BoxMin, b.BoxMax, b.Transform * parent);
         }
-        Walk(ybn.Bounds, toLocal);
+        Walk(rootBounds, toLocal);
         if (tris.Count == 0)
             throw new UserError(cMin != null ? "Diese Kollision liegt nicht im Bereich des Interiors." : "Die Kollision enthält keine darstellbaren Flächen.");
         Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);

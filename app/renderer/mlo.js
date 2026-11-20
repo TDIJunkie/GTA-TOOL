@@ -28,9 +28,11 @@ const MloStudio = (() => {
     document.querySelectorAll('[data-mopen]').forEach((b) => b.addEventListener('click', () => pickAndOpen(b.dataset.mopen, false)));
     $('ms-add').addEventListener('click', () => modal({
       title: 'Weitere Dateien hinzufügen', body: h('p.muted', 'Dateien kommen zum geöffneten Interior dazu (z. B. eigene Props).'),
-      buttons: [{ label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(MloStudio, true) },
+      buttons: [{ label: '✨ Neues Interior', onClick: () => newMloDialog() },
+        { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(MloStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) }, { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('files', true) }],
     }));
+    $('ms-new').addEventListener('click', () => newMloDialog());
     $('ms-close').addEventListener('click', closeAll);
     $('ms-export').addEventListener('click', exportDialog);
     const view = $('view-mlo');
@@ -48,8 +50,18 @@ const MloStudio = (() => {
       toast(`Textur „${name}“ wurde übernommen.`);
       render(true);
     });
-    window.api.on('blender', async ({ model, state, error, studio }) => {
+    window.api.on('blender', async ({ model, state, error, studio, name, warnings }) => {
       if (studio !== 'mlo') return;
+      if (state === 'applied' && String(model).startsWith('newmlo:')) {
+        S.blender[model] = 'open'; S.dirty = true; glbCache.clear(); S.texCache = {}; S.scene = null; S.entityId = null;
+        await reanalyze();
+        const mm = S.model && S.model.mlos.find((x) => x.name === name);
+        if (mm) { S.mloKey = mm.key; S.sel = { type: 'mlo' }; }
+        toast(`✓ Interior „${name}“ aus Blender übernommen.`);
+        for (const w of warnings || []) toast(w, 'warn', 10000);
+        if (App.view === 'mlo') renderAll();
+        return;
+      }
       if (state === 'applied') { S.blender[model] = 'open'; changedFile(model); toast('✓ Aus Blender übernommen.'); await reanalyze(); render(true); }
       else if (state === 'error') toast(`Blender: ${error}`, 'error');
       else if (state === 'closed') { delete S.blender[model]; if (App.view === 'mlo') render(true); }
@@ -187,7 +199,9 @@ const MloStudio = (() => {
       h('div.cards',
         card('Interiors', m.mlos.length), card('Modelle', m.models.length), card('Texturdateien', m.ytds.length),
         card('Kollisionen', m.collisions.length), card('YMAPs', m.ymaps.length), card('YTYPs', m.ytyps.length)),
-      h('div.actions', action('📦', 'Als FiveM-Resource exportieren', 'Fertige Map-Resource (this_is_a_map)', exportDialog)));
+      h('div.actions',
+        action('✨', 'Neues Interior erstellen', 'Auf der Karte platzieren und in Blender bauen', () => newMloDialog()),
+        action('📦', 'Als FiveM-Resource exportieren', 'Fertige Map-Resource (this_is_a_map)', exportDialog)));
   }
   const card = (k, v) => h('div.card', h('div.k', k), h('div.v', String(v)));
 
@@ -277,6 +291,16 @@ const MloStudio = (() => {
     const wrap = h('div',
       h('div.content-head', h('div.title-block', h('h1', m.name), h('div.subtitle#ms-sub',
         `${m.entities} Objekte · ${(m.rooms || []).length} Räume · ${m.portals} Portale · ${base(m.ytyp)}${m.instance ? ` · platziert in ${base(m.instance.ymap)}` : ' · ⚠ keine YMAP-Platzierung'}`))));
+
+    const blendKey = `newmlo:${m.name}`;
+    const src = await call('mlo:blendSource', { name: m.name }, { quiet: true });
+    if (S.blender[blendKey] === 'open') {
+      wrap.append(h('div.notice.info', '🧊 In Blender geöffnet. Rechts (Taste N) → „GTA Tool“: Räume, Portale, Türen anpassen, dann „Speichern & zurück zum GTA Tool“. Hier eingefügte Objekte bleiben dabei erhalten.'));
+    } else if (src && src.exists) {
+      wrap.append(h('div.notice.info', 'Dieses Interior wurde mit dem GTA Tool in Blender gebaut. ',
+        h('button.btn.small', { onclick: () => reopenInBlender(m) }, '🧊 In Blender weiterbearbeiten'),
+        ' (Gebäude, Räume, Portale, Türen – hier eingefügte Objekte bleiben erhalten)'));
+    }
 
     const modeBtn = (mode, label) => h(`button.btn.small${S.mode === mode ? '.primary' : ''}`, { onclick: () => { S.mode = mode; V.sceneMode(mode); render(true); } }, label);
     const roomSel = h('select', { onchange: (e) => { S.room = Number(e.target.value); applyFilter(); renderList(); } },
@@ -445,7 +469,24 @@ const MloStudio = (() => {
           const r = await call('mlo:setPlacement', { ymap: m.instance.ymap, index: m.instance.index, pos: [px, py, pz].map((i) => Number(i.value)), rot: fromEuler(0, 0, Number(heading.value)) }, { busyText: 'YMAP wird gespeichert …' });
           if (r) { S.dirty = true; await reanalyze(); toast(`✓ Platzierung gespeichert. ${r.note}`, 'ok', 9000); render(true); }
         },
-      }, 'Platzierung übernehmen'));
+      }, 'Platzierung übernehmen'),
+      h('button.btn', {
+        style: { marginLeft: '8px' },
+        onclick: async () => {
+          const r = await WorldPlace.open({ pos: m.instance.position.slice(), heading: headingOf(m.instance.rotation), fromScene: true, title: `🎯 „${m.name}“ in der GTA-Welt platzieren` });
+          if (!r) { render(true); return; }
+          const hd = (r.heading * Math.PI) / 180;
+          const res = await call('mlo:setPlacement', { ymap: m.instance.ymap, index: m.instance.index, pos: r.pos, rot: [0, 0, Math.sin(hd / 2), Math.cos(hd / 2)] }, { busyText: 'YMAP wird gespeichert …' });
+          if (res) {
+            S.dirty = true; await reanalyze();
+            const src = await call('mlo:blendSource', { name: m.name }, { quiet: true });
+            toast(src && src.exists
+              ? '✓ Neue Position gespeichert. Damit die Kollision mitwandert: „In Blender weiterbearbeiten“ → „Speichern & zurück“.'
+              : `✓ Neue Position gespeichert. ${res.note}`, 'ok', 12000);
+          }
+          render(true);
+        },
+      }, '🎯 In der Welt platzieren (3D)'));
   }
 
   // ---------------------------------------------------------------- Objekt einfügen
@@ -642,6 +683,125 @@ const MloStudio = (() => {
   }
 
   // ---------------------------------------------------------------- Export
+
+  // ---------------------------------------------------------------- Neues Interior
+
+  const headingOf = (q) => (q ? ((2 * Math.atan2(q[2], q[3]) * 180) / Math.PI + 360) % 360 : 0);
+
+  /** Neues Interior: Name, Position auf der Karte, Drehung, Größe → Blender startet mit einer fertigen Vorlage. */
+  async function newMloDialog() {
+    const st = { x: null, y: null, z: 0, heading: 0, w: 10, d: 8, h: 3.5 };
+    const nameIn = h('input', { type: 'text', placeholder: 'z. B. mein_laden' });
+    const num = (key, step, title) => {
+      const i = h('input.num', { type: 'number', step, value: st[key] ?? '', title, style: { width: '110px' } });
+      i.addEventListener('input', () => { const v = parseFloat(i.value); if (!Number.isNaN(v)) { st[key] = v; marker(); } });
+      return i;
+    };
+    const xIn = num('x', '0.1', 'X (Osten)'), yIn = num('y', '0.1', 'Y (Norden)'), zIn = num('z', '0.1', 'Z (Höhe)');
+    const wIn = num('w', '0.5', 'Breite'), dIn = num('d', '0.5', 'Tiefe'), hIn = num('h', '0.1', 'Raumhöhe');
+    wIn.value = st.w; dIn.value = st.d; hIn.value = st.h;
+    const headOut = h('span.mono', '0°');
+    const headIn = h('input', { type: 'range', min: 0, max: 359, step: 1, value: 0, oninput: (e) => { st.heading = Number(e.target.value); headOut.textContent = `${st.heading}°`; marker(); } });
+    const heightInfo = h('div.hint', 'Klicke auf die Karte, um die Position zu wählen.');
+    const paste = h('input', { type: 'text', placeholder: 'Koordinaten einfügen, z. B. vector3(-1336.5, -3044.2, 13.9) oder -1336.5, -3044.2, 13.9' });
+    const mapEl = h('div.viewer', { style: { height: '430px' } }, h('div.viewer-status', 'Karte wird geladen …'),
+      h('div.viewer-bar', h('span.viewer-hint', 'Klick: Position wählen · Ziehen: Karte verschieben · Mausrad: zoomen')));
+    const V = window.Viewer3D;
+    const marker = () => { if (st.x != null && st.y != null && V && V.mapIsActive()) V.mapSetMarker(st.x, st.y, st.heading, st.w, st.d); };
+    const setPos = async (x, y, z, focus) => {
+      st.x = Math.round(x * 10) / 10; st.y = Math.round(y * 10) / 10;
+      xIn.value = st.x; yIn.value = st.y;
+      if (z != null) { st.z = z; zIn.value = z; } else {
+        const r = await call('map:height', { x: st.x, y: st.y }, { quiet: true });
+        if (r && r.inside) {
+          st.z = Math.round(r.min * 10) / 10; zIn.value = st.z;
+          heightInfo.textContent = `Boden hier ca. ${r.min.toFixed(1)} m · höchster Punkt (z. B. Dach) ${r.z.toFixed(1)} m. Für ein Interior im Untergrund Z einfach niedriger setzen.`;
+        } else heightInfo.textContent = 'Keine Höhendaten für diese Stelle – bitte Z selbst eintragen.';
+      }
+      marker();
+      if (focus && V) V.mapFocus(st.x, st.y, 900);
+    };
+    paste.addEventListener('change', () => {
+      const n = (paste.value.replace(/vec(?:tor)?[234]/gi, ' ').match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+      if (n.length >= 2) setPos(n[0], n[1], n.length >= 3 ? n[2] : null, true);
+      else toast('Keine Koordinaten erkannt.', 'warn');
+    });
+    const field = (label, ...els) => h('label.pos-row', h('span', label), ...els);
+    modal({
+      title: '✨ Neues Interior erstellen',
+      wide: true,
+      onClose: () => { V && V.mapHide(); if (S.model && App.view === 'mlo') setTimeout(() => render(true), 0); },
+      body: h('div',
+        h('p.muted', 'Wähle, wo dein Interior auf der Karte liegen soll. Danach öffnet sich Blender mit einer fertigen Vorlage (Boden, Wände mit Türöffnung, Decke, ein Raum, ein Portal und eine Tür), die du frei umbauen kannst.'),
+        h('div.field', h('label', 'Name des Interiors'), nameIn, h('div.hint', 'Nur Kleinbuchstaben, Zahlen, _ und - (keine Leerzeichen).')),
+        mapEl,
+        h('div.field', { style: { marginTop: '8px' } }, paste),
+        h('div.pos-grid',
+          field('X (Osten)', xIn), field('Y (Norden)', yIn), field('Z (Höhe Boden)', zIn),
+          field('Drehung', headIn, headOut),
+          field('Breite (m)', wIn), field('Tiefe (m)', dIn), field('Raumhöhe (m)', hIn)),
+        heightInfo,
+        h('div.row.gap-s', { style: { marginTop: '8px' } },
+          h('button.btn', {
+            onclick: async () => {
+              if (st.x == null || st.y == null) { toast('Bitte zuerst grob auf der Karte klicken.', 'warn'); return; }
+              const r = await WorldPlace.open({ pos: [st.x, st.y, st.z], heading: st.heading, box: [st.w, st.d, st.h], title: '🎯 Interior in der GTA-Welt platzieren' });
+              // Karte wieder anzeigen
+              V.mount(mapEl);
+              await V.mapShow(null, { center: [r ? r.pos[0] : st.x, r ? r.pos[1] : st.y], height: 900 });
+              if (r) {
+                st.x = Math.round(r.pos[0] * 100) / 100; st.y = Math.round(r.pos[1] * 100) / 100; st.z = Math.round(r.pos[2] * 100) / 100;
+                st.heading = Math.round(r.heading); xIn.value = st.x; yIn.value = st.y; zIn.value = st.z;
+                headIn.value = st.heading; headOut.textContent = `${st.heading}°`;
+                heightInfo.textContent = 'Position aus der 3D-Platzierung übernommen.';
+              }
+              marker();
+            },
+          }, '🎯 In 3D genau platzieren (echte GTA-Umgebung)'))),
+      buttons: [
+        { label: 'Abbrechen' },
+        {
+          label: '🧊 In Blender erstellen', primary: true,
+          onClick: async () => {
+            const name = nameIn.value.trim().toLowerCase();
+            if (!/^[a-z0-9_-]{1,50}$/.test(name)) { toast('Bitte einen gültigen Namen eingeben.', 'warn'); return true; }
+            if (st.x == null || st.y == null) { toast('Bitte eine Position auf der Karte wählen oder Koordinaten eingeben.', 'warn'); return true; }
+            if (S.model && S.model.mlos.some((m) => m.name === name)
+              && !await UI.confirm('Name schon vorhanden', `Es gibt schon ein Interior „${name}“. Beim Zurückschicken aus Blender wird es ersetzt.`, 'Fortfahren', { danger: true })) return true;
+            let reopen = false;
+            const src = await call('mlo:blendSource', { name }, { quiet: true });
+            if (src && src.exists) reopen = await UI.confirm('Gespeicherte Blender-Datei', `Für „${name}“ gibt es schon eine Blender-Datei von früher. Weiterbearbeiten? („Abbrechen“ = neu mit Vorlage beginnen)`, 'Weiterbearbeiten');
+            const r = await call('mlo:newInBlender', { name, pos: [st.x, st.y, st.z], heading: st.heading, size: [st.w, st.d, st.h], reopen }, { busyText: 'Blender wird gestartet …' });
+            if (!r) return true;
+            S.blender[r.key] = 'open';
+            toast(`Blender startet mit „${name}“. Rechts (Taste N) → „GTA Tool“: Räume, Portale, Türen und „Speichern & zurück“.`, 'info', 12000);
+            if (S.model) render(true);
+            return false;
+          },
+        },
+      ],
+    });
+    setTimeout(async () => {
+      V.mount(mapEl);
+      const r = await window.api.invoke('map:glb');
+      if (!r.ok) { mapEl.querySelector('.viewer-status').textContent = `Karte nicht verfügbar: ${r.error} – Koordinaten bitte unten eintragen.`; return; }
+      await V.mapShow(r.data.glb, { center: [-300, -800], height: 7000 });
+      V.mapOn((x, y) => setPos(x, y, null, false));
+      mapEl.querySelector('.viewer-status').textContent = 'GTA-Karte';
+      nameIn.focus();
+    }, 30);
+  }
+
+  /** Für mit dem Tool erstellte Interiors: gespeicherte Blender-Datei wieder öffnen. */
+  async function reopenInBlender(m) {
+    const pos = m.instance ? m.instance.position : [0, 0, 0];
+    const heading = Math.round(headingOf(m.instance && m.instance.rotation) * 10) / 10;
+    const r = await call('mlo:newInBlender', { name: m.name, pos, heading, size: [10, 8, 3.5], reopen: true }, { busyText: 'Blender wird gestartet …' });
+    if (!r) return;
+    S.blender[r.key] = 'open';
+    toast('Blender startet mit deiner gespeicherten Datei. „Speichern & zurück“ baut Gebäude, Räume, Portale und Türen neu – hier eingefügte Objekte bleiben erhalten.', 'info', 12000);
+    render(true);
+  }
 
   async function exportDialog() {
     if (!S.model) return;

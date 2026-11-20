@@ -56,6 +56,7 @@ function init() {
     const dt = animClock.getDelta();
     if (!host || !host.isConnected) return;
     if (animMixer && animAction && !animAction.paused) animStep(dt);
+    if (mapActive) mapTick();
     const moved = controls.update();
     if (moved || needsRender) { renderer.render(scene, camera); needsRender = false; }
   };
@@ -143,6 +144,7 @@ function prepare(root, { ghost = false, highlight = false } = {}) {
 let gridHelper = null;
 
 async function load(buffer, { keepCamera = false, ghost = false } = {}) {
+  mapHide(); worldHide();
   sceneClear();
   const root = await parse(buffer);
   prepare(root, { ghost });
@@ -384,6 +386,7 @@ function applyTransform(o, e) {
 
 /** items: [{ name, glb (Uint8Array|null) }], entities: [{ id, name, position, rotation, scale }] */
 async function sceneLoad(items, entities, { keepCamera = false } = {}) {
+  mapHide(); worldHide();
   animDispose();
   disposeObject(main); disposeObject(overlay); disposeObject(extras); main = overlay = extras = null;
   const keepSel = selectedId;
@@ -514,6 +517,7 @@ function animDispose() {
 
 /** Lädt das Rig (GLB mit Skelett). Bleibt geladen, bis ein anderes Modell kommt. */
 async function animLoadRig(buffer, { keepCamera = false } = {}) {
+  mapHide(); worldHide();
   sceneClear();
   disposeObject(main); disposeObject(overlay); disposeObject(extras); main = overlay = extras = null;
   animDispose();
@@ -646,7 +650,293 @@ function animOn(fn) { animOnTick = fn; }
 function animHasRig() { return !!animRig; }
 function animFit() { if (animWrap) { fit(animWrap); } }
 
-window.Viewer3D = { animLoadRig, animSetClip, animPlay, animSeek, animSpeed, animSetLoop, animSetFollow, animOn, animState, animHasRig, animFit, animDispose, renderNow: () => { controls.update(); renderer.render(scene, camera); },
+// ================================================================ Kartenmodus
+// Radar-Karte von GTA (echte Weltkoordinaten, flach bei y = 0). Draufsicht, Norden oben, Klick wählt eine Position.
+
+let mapRoot = null, mapActive = false, mapMarker = null, mapOnPick = null, mapSaved = null, mapHooked = false;
+
+async function mapShow(buffer, { center = [0, 0], height = 9000 } = {}) {
+  worldHide();
+  sceneClear();
+  disposeObject(main); disposeObject(overlay); disposeObject(extras); main = overlay = extras = null;
+  if (!mapRoot) {
+    mapRoot = await parse(buffer);
+    mapRoot.traverse((c) => { if (c.isMesh) { c.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }); } });
+  }
+  if (!mapRoot.parent) scene.add(mapRoot);
+  if (!mapActive) {
+    mapSaved = { bg: scene.background, near: camera.near, far: camera.far, rot: controls.enableRotate, left: controls.mouseButtons.LEFT, ssp: controls.screenSpacePanning, maxPolar: controls.maxPolarAngle, minD: controls.minDistance, maxD: controls.maxDistance };
+  }
+  mapActive = true;
+  scene.background = new THREE.Color('#29445e');
+  if (ground) ground.visible = false;
+  if (gridHelper) gridHelper.visible = false;
+  controls.enableRotate = false;
+  controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 30; controls.maxDistance = 16000;
+  camera.near = 1; camera.far = 60000; camera.updateProjectionMatrix();
+  mapFocus(center[0], center[1], height);
+  hookMapPick();
+  needsRender = true;
+}
+
+function mapFocus(x, y, height) {
+  const h = height || camera.position.y || 3000;
+  controls.target.set(x, 0, -y);
+  camera.position.set(x, h, -y + 0.001);
+  controls.update();
+  needsRender = true;
+}
+
+function mapHide() {
+  if (!mapActive) return;
+  mapActive = false;
+  if (mapRoot && mapRoot.parent) scene.remove(mapRoot);
+  if (mapMarker) { scene.remove(mapMarker); mapMarker = null; }
+  if (mapSaved) {
+    scene.background = mapSaved.bg; camera.near = mapSaved.near; camera.far = mapSaved.far; camera.updateProjectionMatrix();
+    controls.enableRotate = mapSaved.rot; controls.mouseButtons.LEFT = mapSaved.left; controls.screenSpacePanning = mapSaved.ssp;
+    controls.maxPolarAngle = mapSaved.maxPolar; controls.minDistance = mapSaved.minD; controls.maxDistance = mapSaved.maxD;
+  }
+  if (ground) ground.visible = true;
+  if (gridHelper) gridHelper.visible = true;
+  mapOnPick = null;
+  needsRender = true;
+}
+
+function hookMapPick() {
+  if (mapHooked) return;
+  mapHooked = true;
+  const el = renderer.domElement;
+  let down = null;
+  el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+  el.addEventListener('pointerup', (e) => {
+    if (!mapActive || !down) return;
+    if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 4) return;
+    const r = el.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    const p = new THREE.Vector3();
+    if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p)) return;
+    if (mapOnPick) mapOnPick(p.x, -p.z);
+  });
+}
+
+/** Marker: Grundriss (Breite × Tiefe, Drehung in Grad, GTA-Heading) + gut sichtbare Nadel. */
+function mapSetMarker(x, y, heading = 0, w = 10, d = 8) {
+  if (mapMarker) scene.remove(mapMarker);
+  const g = new THREE.Group();
+  const foot = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ color: 0xff4d4d, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthTest: false }));
+  foot.rotation.x = -Math.PI / 2;
+  const edge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, d)), new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
+  edge.rotation.x = -Math.PI / 2;
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(Math.min(w, d) * 0.18, Math.min(w, d) * 0.35, 3), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
+  arrow.rotation.set(-Math.PI / 2, 0, 0); arrow.position.set(0, 0.1, -d / 2 - Math.min(w, d) * 0.1);
+  const room = new THREE.Group(); room.add(foot, edge);
+  room.rotation.y = (heading * Math.PI) / 180;
+  const pin = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 1, 32), new THREE.MeshBasicMaterial({ color: 0xff3030, side: THREE.DoubleSide, depthTest: false }));
+  ring.rotation.x = -Math.PI / 2;
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.25, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
+  dot.rotation.x = -Math.PI / 2;
+  pin.add(ring, dot);
+  pin.userData.pin = true;
+  g.add(room, pin);
+  room.add(arrow);
+  g.position.set(x, 2, -y);
+  g.renderOrder = 10;
+  g.traverse((c) => { c.renderOrder = 10; });
+  mapMarker = g;
+  scene.add(g);
+  needsRender = true;
+}
+
+function mapTick() {
+  if (!mapMarker) return;
+  const pin = mapMarker.children.find((c) => c.userData.pin);
+  if (pin) { const s = Math.max(4, camera.position.y / 45); if (Math.abs(pin.scale.x - s) > 0.01) { pin.scale.setScalar(s); needsRender = true; } }
+}
+
+function mapOn(fn) { mapOnPick = fn; }
+function mapIsActive() { return mapActive; }
+
+// ================================================================ Welt-Platzierung
+// Echte GTA-Umgebung (Gelände, Gebäude) um einen Ursprung + ein verschiebbares/drehbares Objekt (Box oder MLO-Szene).
+// Alles relativ zum Ursprung (Genauigkeit), GTA (x, y, z) → three (x, z, -y).
+
+let worldActive = false, worldRoot = null, worldOrigin = [0, 0, 0], worldObj = null, worldOnChange = null, worldSaved = null;
+let worldCaptured = null, worldChangeHooked = false;
+const worldTemplates = new Map();
+
+function worldShow(origin, { fromScene = false } = {}) {
+  if (worldActive) {
+    // Neu laden (z. B. anderer Umkreis): nur die Umgebung ersetzen, Objekt und gesicherte Szene bleiben
+    if (worldRoot) scene.remove(worldRoot);
+    worldRoot = new THREE.Group();
+    scene.add(worldRoot);
+    worldOrigin = origin.slice();
+    needsRender = true;
+    return;
+  }
+  mapHide();
+  const captured = fromScene && sceneRoot ? sceneRoot.clone(true) : null;
+  worldSaved = { sceneRoot, onMoved, bg: scene.background, near: camera.near, far: camera.far, minD: controls.minDistance, maxD: controls.maxDistance, maxPolar: controls.maxPolarAngle };
+  if (tctrl) tctrl.detach();
+  if (selBox) { scene.remove(selBox); selBox = null; }
+  if (sceneRoot) scene.remove(sceneRoot);
+  if (collisionRoot) { disposeObject(collisionRoot); collisionRoot = null; }
+  sceneRoot = null; onMoved = null;
+  animDispose();
+  disposeObject(main); disposeObject(overlay); disposeObject(extras); main = overlay = extras = null;
+  if (worldRoot) scene.remove(worldRoot);
+  worldRoot = new THREE.Group();
+  scene.add(worldRoot);
+  worldOrigin = origin.slice();
+  worldActive = true;
+  worldCaptured = captured;
+  scene.background = new THREE.Color('#8fa9c4');
+  if (ground) ground.visible = false;
+  if (gridHelper) gridHelper.visible = false;
+  camera.near = 0.3; camera.far = 6000; camera.updateProjectionMatrix();
+  controls.minDistance = 2; controls.maxDistance = 1500; controls.maxPolarAngle = Math.PI * 0.49;
+  controls.target.set(0, 0, 0);
+  camera.position.set(45, 55, 70);
+  controls.update();
+  needsRender = true;
+}
+
+/** Modell (GLB) einmal laden und für alle Objekte dieses Namens in die Umgebung setzen. */
+async function worldAdd(name, buffer, entities) {
+  if (!worldActive) return;
+  let t = worldTemplates.get(name);
+  if (!t && buffer) {
+    try {
+      t = await parse(buffer);
+      t.traverse((c) => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = false; } });
+      worldTemplates.set(name, t);
+    } catch { return; }
+  }
+  if (!t || !worldActive || !worldRoot) return;
+  for (const e of entities) {
+    const o = t.clone(true);
+    const p = e.position;
+    o.position.copy(toThreePos([p[0] - worldOrigin[0], p[1] - worldOrigin[1], p[2] - worldOrigin[2]]));
+    o.quaternion.copy(toThreeQuat(e.rotation));
+    const sxy = (e.scale && e.scale[0]) || 1, sz = (e.scale && e.scale[1]) || 1;
+    o.scale.set(sxy, sz, sxy);
+    worldRoot.add(o);
+  }
+  needsRender = true;
+}
+
+function worldGta(o) {
+  const g = toGtaPos(o.position);
+  const e = new THREE.Euler().setFromQuaternion(o.quaternion, 'YXZ');
+  let hdg = (e.y * 180) / Math.PI;
+  hdg = ((hdg % 360) + 360) % 360;
+  return { pos: [g[0] + worldOrigin[0], g[1] + worldOrigin[1], g[2] + worldOrigin[2]], heading: hdg };
+}
+
+/** Objekt zum Platzieren: Box (Breite, Tiefe, Höhe; Ursprung = Bodenmitte) oder die zuvor geladene MLO-Szene. */
+function worldSetObject(pos, heading, box) {
+  if (worldObj) { if (tctrl) tctrl.detach(); scene.remove(worldObj); }
+  const g = new THREE.Group();
+  if (worldCaptured) {
+    g.add(worldCaptured);
+  } else {
+    const [w, d, h] = box || [10, 8, 3.5];
+    const geo = new THREE.BoxGeometry(w, h, d);
+    geo.translate(0, h / 2, 0);
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xff4d4d, transparent: true, opacity: 0.35, depthWrite: false }));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffffff }));
+    // Vorderseite (Eingang der Vorlage liegt bei -Y = three +Z)
+    const front = new THREE.Mesh(new THREE.ConeGeometry(Math.min(w, d) * 0.12, Math.min(w, d) * 0.25, 3), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    front.rotation.set(Math.PI / 2, 0, 0); front.position.set(0, 0.05, d / 2 + Math.min(w, d) * 0.15);
+    g.add(m, edges, front);
+  }
+  g.position.copy(toThreePos([pos[0] - worldOrigin[0], pos[1] - worldOrigin[1], pos[2] - worldOrigin[2]]));
+  g.rotation.set(0, (heading * Math.PI) / 180, 0, 'YXZ');
+  worldObj = g;
+  scene.add(g);
+  worldModeSet('translate');
+  tctrl.attach(g);
+  needsRender = true;
+}
+
+function worldModeSet(mode) {
+  ensureTransformControls();
+  tctrl.setMode(mode);
+  tctrl.setSpace(mode === 'rotate' ? 'local' : 'world');
+  tctrl.showX = mode !== 'rotate'; tctrl.showZ = mode !== 'rotate'; tctrl.showY = true;
+  if (!worldChangeHooked) {
+    worldChangeHooked = true;
+    tctrl.addEventListener('objectChange', () => {
+      if (!worldActive || !worldObj || tctrl.object !== worldObj) return;
+      worldObj.rotation.set(0, new THREE.Euler().setFromQuaternion(worldObj.quaternion, 'YXZ').y, 0, 'YXZ');
+      if (worldOnChange) worldOnChange(worldGta(worldObj));
+    });
+  }
+  needsRender = true;
+}
+
+/** Objekt auf die Oberfläche darunter setzen (Gelände/Gebäude). */
+function worldSnap() {
+  if (!worldObj || !worldRoot) return null;
+  worldRoot.updateMatrixWorld(true);
+  const from = worldObj.position.clone(); from.y += 300;
+  const ray = new THREE.Raycaster(from, new THREE.Vector3(0, -1, 0), 0, 1000);
+  const hits = ray.intersectObject(worldRoot, true);
+  if (!hits.length) return null;
+  worldObj.position.y = hits[0].point.y;
+  needsRender = true;
+  const r = worldGta(worldObj);
+  if (worldOnChange) worldOnChange(r);
+  return r;
+}
+
+/** Werte von außen setzen (Zahlenfelder). */
+function worldSetValues(pos, heading) {
+  if (!worldObj) return;
+  worldObj.position.copy(toThreePos([pos[0] - worldOrigin[0], pos[1] - worldOrigin[1], pos[2] - worldOrigin[2]]));
+  worldObj.rotation.set(0, (heading * Math.PI) / 180, 0, 'YXZ');
+  needsRender = true;
+}
+
+function worldFocusObject() {
+  if (!worldObj) return;
+  const c = worldObj.position.clone();
+  const dir = camera.position.clone().sub(controls.target);
+  controls.target.copy(c);
+  camera.position.copy(c).add(dir);
+  controls.update();
+  needsRender = true;
+}
+
+function worldHide() {
+  if (!worldActive) return;
+  worldActive = false;
+  if (tctrl) { tctrl.detach(); tctrl.showX = tctrl.showY = tctrl.showZ = true; }
+  if (worldObj) { scene.remove(worldObj); worldObj = null; }
+  if (worldRoot) { scene.remove(worldRoot); worldRoot = null; }
+  worldCaptured = null;
+  worldOnChange = null;
+  if (worldSaved) {
+    sceneRoot = worldSaved.sceneRoot; onMoved = worldSaved.onMoved;
+    if (sceneRoot) scene.add(sceneRoot);
+    scene.background = worldSaved.bg; camera.near = worldSaved.near; camera.far = worldSaved.far; camera.updateProjectionMatrix();
+    controls.minDistance = worldSaved.minD; controls.maxDistance = worldSaved.maxD; controls.maxPolarAngle = worldSaved.maxPolar;
+    worldSaved = null;
+  }
+  if (ground) ground.visible = true;
+  if (gridHelper) gridHelper.visible = true;
+  needsRender = true;
+}
+
+function worldOn(fn) { worldOnChange = fn; }
+function worldHas(name) { return worldTemplates.has(name); }
+
+window.Viewer3D = { worldShow, worldAdd, worldSetObject, worldModeSet, worldSnap, worldSetValues, worldFocusObject, worldHide, worldOn, worldHas, mapShow, mapHide, mapFocus, mapSetMarker, mapOn, mapIsActive, animLoadRig, animSetClip, animPlay, animSeek, animSpeed, animSetLoop, animSetFollow, animOn, animState, animHasRig, animFit, animDispose, renderNow: () => { controls.update(); renderer.render(scene, camera); },
   sceneLoad, sceneSelect, sceneFocus, sceneMode, sceneUpdate, sceneFilter, sceneSetCollision, sceneOn, sceneClear, fitObject: () => sceneRoot && fitObject(sceneRoot),
    setMainOffset, setGround, fitAll, mount, load, loadOverlay, clearOverlay, clear, setExtras, setPaint, resetView, view, debugInfo };
 window.dispatchEvent(new Event('viewer3d-ready'));

@@ -18,7 +18,7 @@ const TEXCONV = isPacked ? path.join(ROOT, 'tools', 'texconv.exe') : path.join(R
 const BRIDGE = path.join(ROOT, 'blender', 'gta_tool_bridge.py');
 const TEMP_ROOT = path.join(os.tmpdir(), 'GTATool');
 
-const startView = process.argv.includes('--vehicle-studio') ? 'vehicles' : process.argv.includes('--clothing-studio') ? 'clothing' : process.argv.includes('--mlo-studio') ? 'mlo' : process.argv.includes('--anim-studio') ? 'anim' : 'start';
+const startView = process.argv.includes('--vehicle-studio') ? 'vehicles' : process.argv.includes('--clothing-studio') ? 'clothing' : process.argv.includes('--mlo-studio') ? 'mlo' : process.argv.includes('--anim-studio') ? 'anim' : process.argv.includes('--prop-studio') ? 'prop' : 'start';
 const startFiles = process.argv.slice(1).filter((a) => !a.startsWith('--') && /\.(rpf|yft|ytd|meta)$/i.test(a) && fs.existsSync(a));
 
 let win = null;
@@ -269,7 +269,7 @@ async function loadKeys() {
 // ------------------------------------------------------------------ Sitzung (kein Projekt!)
 
 // Jede Oberfläche (Fahrzeuge, Kleidung) hat ihre eigene Sitzung; „sessionDir“ zeigt auf die aktive.
-const sessions = { vehicles: null, clothing: null, mlo: null, anim: null };
+const sessions = { vehicles: null, clothing: null, mlo: null, anim: null, prop: null };
 let activeStudio = 'vehicles';
 Object.defineProperty(globalThis, 'sessionDir', {
   get: () => sessions[activeStudio],
@@ -417,6 +417,7 @@ function registerIpc() {
     const opts = {
       folder: { title: 'Ordner importieren', properties: ['openDirectory', 'multiSelections'] },
       files: { title: 'Dateien öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Dateien', extensions: ['yft', 'ytd', 'meta', 'xml', 'rpf', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      propfiles: { title: 'Props öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Props', extensions: ['ydr', 'yft', 'ytd', 'ytyp', 'ybn', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       animfiles: { title: 'Animationen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Animationen', extensions: ['ycd', 'xml', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       images: { title: 'Bild wählen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
       image: { title: 'Bild wählen', properties: ['openFile'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
@@ -428,7 +429,7 @@ function registerIpc() {
       exe: { title: 'Programm wählen', properties: ['openFile'], filters: [{ name: 'Programm', extensions: ['exe'] }] },
       gta: { title: 'GTA-V-Ordner wählen (mit GTA5.exe)', properties: ['openDirectory'] },
     }[kind];
-    const importKinds = ['folder', 'files', 'animfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
+    const importKinds = ['folder', 'files', 'animfiles', 'propfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
     const isImport = importKinds.includes(kind);
     const start = isImport ? settings.lastImportDir : kind === 'outdir' ? (settings.lastResourceDir || settings.lastExportDir) : null;
     if (start && fs.existsSync(start)) opts.defaultPath = start;
@@ -484,6 +485,71 @@ function registerIpc() {
     }
     return call('mlo.importModel', { sessionDir, key, ydr, ytd: ytd || '', backupDir: backupDir() });
   });
+  // GTA-Welt für die 3D-Platzierung
+  const worldCache = () => path.join(app.getPath('userData'), 'gta-welt.json');
+  handle('world:status', async () => call('world.status', { cacheFile: worldCache() }));
+  handle('world:build', async () => call('world.build', { gtaPath: settings.gtaPath || '', cacheFile: worldCache() }));
+  handle('world:area', async ({ x, y, radius }) => call('world.area', { gtaPath: settings.gtaPath || '', cacheFile: worldCache(), propsCache: propsCache(), x, y, radius: radius || 120, max: 1500 }));
+  handle('world:archGlb', async ({ name }) => {
+    const out = path.join(app.getPath('userData'), 'gta-objekte-glb', `${String(name).replace(/[^\w.-]/g, '_')}.glb`);
+    if (!fs.existsSync(out)) await call('world.archGlb', { gtaPath: settings.gtaPath || '', propsCache: propsCache(), propsDir: propsDir(), name, outFile: out });
+    return { glb: fs.readFileSync(out) };
+  });
+
+  // Neues Interior: Karte, Bodenhöhe, Blender
+  handle('map:glb', async () => {
+    const out = path.join(app.getPath('userData'), 'karte2.glb');
+    await call('map.build', { gtaPath: settings.gtaPath || '', outFile: out });
+    return { glb: fs.readFileSync(out) };
+  });
+  handle('map:height', async ({ x, y }) => call('map.height', { gtaPath: settings.gtaPath || '', x, y, flipY: 'false' }));
+  const blendSource = (n) => path.join(app.getPath('userData'), 'blender-quellen', `${n}.blend`);
+  handle('mlo:blendSource', async ({ name }) => ({ exists: fs.existsSync(blendSource(String(name || '').toLowerCase())) }));
+  handle('mlo:newInBlender', async ({ name, pos, heading, size, reopen }) => {
+    requireBlender();
+    const n = String(name || '').trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,50}$/.test(n)) throw new Error('Bitte einen gültigen Namen eingeben (a–z, 0–9, _ und -).');
+    const key = `newmlo:${n}`;
+    if (blenderSessions.has(key)) throw new Error('Dieses Interior ist bereits in Blender geöffnet.');
+    if (!sessionDir) newSessionDir();
+    const sd = sessionDir;
+    const work = path.join(sd, 'blender', `neu_mlo_${n}`);
+    const exportDir = path.join(work, 'out');
+    const statusFile = path.join(work, 'status.json');
+    fs.mkdirSync(work, { recursive: true });
+    try { fs.rmSync(statusFile, { force: true }); } catch { /* egal */ }
+    let doors = [];
+    try { doors = await call('mlo.doorList', { propsCache: propsCache() }); } catch { doors = []; }
+    const doorsFile = path.join(work, 'tueren.json');
+    fs.writeFileSync(doorsFile, JSON.stringify(doors));
+    const blend = blendSource(n);
+    fs.mkdirSync(path.dirname(blend), { recursive: true });
+    const p = (pos || [0, 0, 0]).map(Number);
+    const s3 = (size || [10, 8, 3.5]).map(Number);
+    const args = [];
+    if (reopen && fs.existsSync(blend)) args.push(blend);
+    args.push('--python', BRIDGE, '--', '--new-mlo', n, '--pos', p.join(','), '--heading', String(Number(heading) || 0), '--size', s3.join(','),
+      '--doors', doorsFile, '--blend-save', blend, '--export', exportDir, '--status', statusFile);
+    const proc = spawn(settings.blenderPath, args, { detached: false, stdio: 'ignore' });
+    const entry = { proc, lastExport: 0 };
+    blenderSessions.set(key, entry);
+    let lastErr = null;
+    const poll = setInterval(async () => {
+      let st;
+      try { st = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch { return; }
+      if (st.event === 'error' && st.error && st.error !== lastErr) { lastErr = st.error; send('blender', { model: key, state: 'error', error: st.error, studio: 'mlo' }); }
+      if (st.last && st.last > entry.lastExport) {
+        entry.lastExport = st.last;
+        try {
+          const res = await call('mlo.applyNew', { sessionDir: sd, exportDir, name: n, backupDir: path.join(sd, 'backup') });
+          send('blender', { model: key, state: 'applied', name: n, warnings: res.warnings || [], files: [], studio: 'mlo' });
+        } catch (e) { send('blender', { model: key, state: 'error', error: e.message, studio: 'mlo' }); }
+      }
+    }, 1000);
+    proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'closed', studio: 'mlo' }); });
+    proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'error', error: e.message, studio: 'mlo' }); });
+    return { ok: true, key, reopened: !!(reopen && fs.existsSync(blend)) };
+  });
   handle('mlo:export', async ({ outDir, resourceName }) => {
     rememberExportDir(outDir);
     return call('mlo.export', { sessionDir, outDir, resourceName });
@@ -491,7 +557,8 @@ function registerIpc() {
   handle('props:status', async () => call('props.status', { cacheFile: propsCache() }));
   handle('props:build', async () => call('props.build', { gtaPath: settings.gtaPath || '', cacheFile: propsCache() }));
   handle('props:search', async ({ term }) => call('props.search', { cacheFile: propsCache(), term, max: 300 }));
-  handle('mlo:blender', async ({ file, ytds }) => {
+  handle('mlo:blender', async ({ file, ytds, studio: st }) => {
+    const studio = st || 'mlo';
     requireBlender();
     if (blenderSessions.has(file)) throw new Error('Diese Datei ist bereits in Blender geöffnet.');
     const sd = sessionDir;
@@ -506,17 +573,17 @@ function registerIpc() {
     const poll = setInterval(async () => {
       let st;
       try { st = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch { return; }
-      if (st.event === 'error' && st.error && st.error !== lastErr) { lastErr = st.error; send('blender', { model: file, state: 'error', error: st.error, studio: 'mlo' }); }
+      if (st.event === 'error' && st.error && st.error !== lastErr) { lastErr = st.error; send('blender', { model: file, state: 'error', error: st.error, studio }); }
       if (st.last && st.last > entry.lastExport) {
         entry.lastExport = st.last;
         try {
           const res = await call('blender.applyFile', { sessionDir: sd, file, exportDir, backupDir: path.join(sd, 'backup') });
-          send('blender', { model: file, state: 'applied', files: [res.applied], studio: 'mlo' });
-        } catch (e) { send('blender', { model: file, state: 'error', error: e.message, studio: 'mlo' }); }
+          send('blender', { model: file, state: 'applied', files: [res.applied], studio });
+        } catch (e) { send('blender', { model: file, state: 'error', error: e.message, studio }); }
       }
     }, 1000);
-    proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'closed', studio: 'mlo' }); });
-    proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'error', error: e.message, studio: 'mlo' }); });
+    proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'closed', studio }); });
+    proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'error', error: e.message, studio }); });
     return { ok: true };
   });
 
@@ -627,6 +694,70 @@ function registerIpc() {
     proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(id); send('blender', { model: id, state: 'closed' }); });
     proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(id); send('blender', { model: id, state: 'error', error: e.message }); });
     return { ok: true };
+  });
+
+  // ------------------------------------------------ Props
+  handle('prop:open', async ({ paths, add }) => {
+    rememberImport(paths);
+    if (!add || !sessionDir) newSessionDir();
+    const r = await call('session.open', { paths, sessionDir });
+    const model = await call('prop.analyze', { sessionDir });
+    return { ...model, warnings: [...(r.warnings || []).filter((w) => !/keine verwendbaren/.test(w)), ...model.warnings] };
+  });
+  handle('prop:new', async () => { if (!sessionDir) newSessionDir(); return call('prop.analyze', { sessionDir }); });
+  handle('prop:analyze', async () => call('prop.analyze', { sessionDir }));
+  handle('prop:details', async ({ file }) => call('prop.details', { sessionDir, file }));
+  handle('prop:ensureArchetypes', async ({ ytypName }) => call('prop.ensureArchetypes', { sessionDir, ytypName: ytypName || '', backupDir: backupDir() }));
+  handle('prop:setLod', async ({ name, lodDist }) => call('prop.setLod', { sessionDir, name, lodDist, backupDir: backupDir() }));
+  handle('prop:rename', async ({ name, newName }) => call('prop.rename', { sessionDir, name, newName, backupDir: backupDir() }));
+  handle('prop:delete', async ({ name }) => call('prop.delete', { sessionDir, name, backupDir: backupDir() }));
+  handle('prop:addFromGta', async ({ gtaName, newName }) => {
+    if (!sessionDir) newSessionDir();
+    return call('prop.addFromGta', { sessionDir, gtaPath: settings.gtaPath || '', propsCache: propsCache(), propsDir: propsDir(), gtaName, newName, ytypName: '', backupDir: backupDir() });
+  });
+  handle('prop:gtaPreview', async ({ name }) => {
+    const out = path.join(TEMP_ROOT, 'gta-vorschau', 'props', `${String(name).replace(/[^\w.-]/g, '_')}.glb`);
+    if (!sessionDir) newSessionDir();
+    fs.mkdirSync(path.join(sessionDir, 'stream'), { recursive: true });
+    if (!fs.existsSync(out)) await call('mlo.archGlb', { sessionDir, name, gtaPath: settings.gtaPath || '', propsCache: propsCache(), propsDir: propsDir(), outFile: out });
+    return { glb: fs.readFileSync(out) };
+  });
+  handle('prop:newInBlender', async ({ name }) => {
+    requireBlender();
+    const n = String(name || '').trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,60}$/.test(n)) throw new Error('Bitte einen gültigen Namen eingeben (a–z, 0–9, _ und -).');
+    const key = `new:${n}`;
+    if (blenderSessions.has(key)) throw new Error('Dieses Prop ist bereits in Blender geöffnet.');
+    if (!sessionDir) newSessionDir();
+    const sd = sessionDir;
+    const work = path.join(sd, 'blender', `neu_${n}`);
+    const exportDir = path.join(work, 'out');
+    const statusFile = path.join(work, 'status.json');
+    fs.mkdirSync(work, { recursive: true });
+    try { fs.rmSync(statusFile, { force: true }); } catch { /* egal */ }
+    const proc = spawn(settings.blenderPath, ['--python', BRIDGE, '--', '--new-prop', n, '--export', exportDir, '--status', statusFile], { detached: false, stdio: 'ignore' });
+    const entry = { proc, lastExport: 0 };
+    blenderSessions.set(key, entry);
+    let lastErr = null;
+    const poll = setInterval(async () => {
+      let st;
+      try { st = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch { return; }
+      if (st.event === 'error' && st.error && st.error !== lastErr) { lastErr = st.error; send('blender', { model: key, state: 'error', error: st.error, studio: 'prop' }); }
+      if (st.last && st.last > entry.lastExport) {
+        entry.lastExport = st.last;
+        try {
+          const res = await call('prop.applyNew', { sessionDir: sd, exportDir, name: n, backupDir: path.join(sd, 'backup') });
+          send('blender', { model: key, state: 'applied', files: [res.file], name: n, studio: 'prop' });
+        } catch (e) { send('blender', { model: key, state: 'error', error: e.message, studio: 'prop' }); }
+      }
+    }, 1000);
+    proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'closed', studio: 'prop' }); });
+    proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'error', error: e.message, studio: 'prop' }); });
+    return { ok: true, key };
+  });
+  handle('prop:export', async ({ outDir, resourceName, testCommand }) => {
+    rememberExportDir(outDir);
+    return call('prop.export', { sessionDir, outDir, resourceName, testCommand: testCommand ? 'true' : 'false', backupDir: backupDir() });
   });
 
   // ------------------------------------------------ Animationen

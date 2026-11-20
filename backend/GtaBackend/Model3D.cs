@@ -14,6 +14,9 @@ namespace GtaBackend;
 /// </summary>
 public static class Model3D
 {
+    /// <summary>Maximale Texturgröße in GLBs (Umgebungsansicht: klein).</summary>
+    public static int TextureLimit = 1024;
+
     static readonly HashSet<ushort> WheelFront = new() { 27922, 26418 };
     static readonly HashSet<ushort> WheelRear = new() { 29921, 29922, 29923, 27902, 5857, 5858, 5859, 26398 };
     static readonly HashSet<ushort> WheelRight = new() { 26418, 5857, 5858, 5859, 26398 };
@@ -751,7 +754,7 @@ public static class Model3D
         {
             try
             {
-                var png = TexturePng(t, 1024);
+                var png = TexturePng(t, TextureLimit);
                 if (png != null) { idx = b.Images.Count; b.Images.Add(png); }
             }
             catch (Exception ex) { Program.Log($"3D-Textur {name}: {ex.Message}"); }

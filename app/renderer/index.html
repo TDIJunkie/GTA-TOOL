@@ -45,6 +45,11 @@
           <span class="tile-title">Animationen</span>
           <span class="tile-text">Animationen ansehen, bearbeiten, in Blender ändern, als Resource exportieren</span>
         </button>
+        <button class="tile" data-goto="prop">
+          <span class="tile-icon">🪑</span>
+          <span class="tile-title">Props / Objekte</span>
+          <span class="tile-text">Eigene Objekte, Texturen, Kollision, Blender, GTA-Objekte als Vorlage</span>
+        </button>
       </div>
     </main>
   </section>
@@ -156,6 +161,7 @@
         <div class="row center gap wrap">
           <button class="btn primary big" data-mopen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-mopen="files">📄 Dateien öffnen</button>
+          <button class="btn big" id="ms-new">✨ Neues Interior erstellen</button>
           <button class="btn big" data-sftp-open="mlo">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
@@ -220,6 +226,49 @@
     </footer>
   </section>
 
+  <!-- ============ PROP STUDIO ============ -->
+  <section id="view-prop" class="view hidden">
+    <header class="topbar">
+      <button class="btn ghost" data-goto="start">← Startseite</button>
+      <div class="brand">Prop Studio</div>
+      <div class="spacer"></div>
+      <span id="keys-badge-6" class="badge">GTA-Schlüssel …</span>
+      <button class="btn ghost" data-action="settings">⚙ Einstellungen</button>
+    </header>
+    <main id="ps-empty" class="vs-empty">
+      <div class="dropzone" id="pdropzone">
+        <div class="drop-icon">🪑</div>
+        <h2>Props öffnen</h2>
+        <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Prop-Resource) oder einzelne <b>Dateien</b> hierher.<br>
+          Erkannt werden Modelle (.ydr, .yft), Texturen (.ytd), Kollisionen (.ybn), Archetypen (.ytyp) und Archive (.rpf).</p>
+        <div class="row center gap wrap">
+          <button class="btn primary big" data-popen="folder">📁 Ordner importieren</button>
+          <button class="btn big" data-popen="propfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="prop">🌐 Vom Server (SFTP)</button>
+          <button class="btn big" id="ps-gta">🪑 Aus GTA-Objekt erstellen</button>
+          <button class="btn big" id="ps-new">✨ Neu in Blender erstellen</button>
+        </div>
+      </div>
+    </main>
+    <main id="ps-main" class="vs-main hidden">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <div class="row gap-s">
+            <button class="btn small" id="ps-add">+ Hinzufügen</button>
+            <button class="btn small ghost" id="ps-close">Schließen</button>
+          </div>
+        </div>
+        <div class="tree" id="ps-tree"></div>
+      </aside>
+      <section class="content" id="ps-content"></section>
+    </main>
+    <footer class="statusbar">
+      <span id="ps-status-text" class="muted">Bereit.</span>
+      <div class="spacer"></div>
+      <button class="btn primary" id="ps-export" disabled>📦 Als FiveM-Resource exportieren</button>
+    </footer>
+  </section>
+
   <!-- Overlays -->
   <div id="modal-root"></div>
   <div id="toasts"></div>
@@ -236,7 +285,9 @@
   <script src="clothing.js"></script>
   <script src="mlo.js"></script>
   <script src="anim.js"></script>
+  <script src="props.js"></script>
   <script src="sftp.js"></script>
+  <script src="placement.js"></script>
   <script src="app.js"></script>
   <script type="module" src="viewer3d.js"></script>
 </body>
