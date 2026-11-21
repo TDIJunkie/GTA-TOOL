@@ -682,7 +682,7 @@ public static class Clothing
 
     public static object Export(string sessionDir, string outDir, string resourceName)
     {
-        resourceName = Session.SafeName(resourceName);
+        resourceName = ExportMerge.ResName(resourceName);
         var res = Path.Combine(outDir, resourceName);
         if (Directory.Exists(res) && Directory.EnumerateFileSystemEntries(res).Any())
         {

@@ -47,7 +47,8 @@ function saveSettings() {
 }
 
 /** Ordnername einer Resource (wie im Backend: Session.SafeName). */
-const safeResourceName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '') || 'quelle';
+// Gleiche Regel wie ExportMerge.ResName im Backend: Name bleibt exakt, nur für Ordner unzulässige Zeichen werden ersetzt.
+const safeResourceName = (n) => String(n || '').trim().replace(/[^\x21-\x7E]|[<>:"/\\|?*]/g, '_').replace(/\.+$/, '') || 'resource';
 
 /** Letzten Export-Ordner merken – aber nicht die Zwischenablage für SFTP-Exporte. */
 function rememberExportDir(dir) {
@@ -1027,6 +1028,7 @@ function registerIpc() {
     return r;
   });
   handle('sftp:last', async () => settings.sftpLast || {});
+  handle('session:original', async () => (sessionDir ? call('session.original', { sessionDir }) : { name: null }));
   handle('sftp:exists', async ({ id, remoteDir, resourceName }) => sftp.exists(id, remoteDir, safeResourceName(resourceName)));
   handle('sftp:stage', async () => { const d = path.join(TEMP_ROOT, `sftp-export-${Date.now()}`); fs.mkdirSync(d, { recursive: true }); return d; });
   handle('sftp:upload', async ({ id, local, remoteDir }) => {
@@ -1097,7 +1099,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   loadSettings();
-  sftp.init({ getSettings: () => settings, saveSettings, safeStorage, send: (c, d) => send(c, d), tempRoot: TEMP_ROOT, log: logLine });
+  sftp.init({ getSettings: () => settings, saveSettings, safeStorage, send: (c, d) => send(c, d), tempRoot: TEMP_ROOT, backupRoot: path.join(app.getPath('userData'), 'server-sicherungen'), stateFile: path.join(app.getPath('userData'), 'sftp-stand.json'), log: logLine });
   cleanupOldSessions();
   startBackend();
   registerIpc();

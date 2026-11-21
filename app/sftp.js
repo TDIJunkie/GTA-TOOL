@@ -218,15 +218,15 @@ async function transfer(id, kind, from, to, label) {
 }
 
 /** Lädt Dateien/Ordner in einen neuen lokalen Ordner (Struktur und Ordnernamen bleiben erhalten). */
-async function download(id, remotePaths) {
+async function download(id, remotePaths, intoDir, verb) {
   if (!remotePaths || !remotePaths.length) throw new Error('Nichts ausgewählt.');
-  const local = path.join(ctx.tempRoot, `sftp-${Date.now()}`);
+  const local = intoDir || path.join(ctx.tempRoot, `sftp-${Date.now()}`);
   fs.mkdirSync(local, { recursive: true });
   // Erst alles auflisten (Größen kommen gleich mit, für den Fortschritt)
   const files = [];
   const results = [];
   await wrap(id, async (c) => {
-    const walk = async (rp, lp, typeHint, sizeHint) => {
+    const walk = async (rp, lp, typeHint, sizeHint, mtimeHint) => {
       const t = typeHint || await c.exists(rp);
       if (t === 'd') {
         fs.mkdirSync(lp, { recursive: true });
@@ -234,9 +234,9 @@ async function download(id, remotePaths) {
         for (const e of await c.list(rp)) {
           if (e.name === '.' || e.name === '..') continue;
           if (e.type === 'd' && /^(\.git|node_modules|cache|\.vs)$/i.test(e.name)) continue;
-          await walk(posix.join(rp, e.name), path.join(lp, safeLocal(e.name)), e.type === 'l' ? null : e.type, e.size);
+          await walk(posix.join(rp, e.name), path.join(lp, safeLocal(e.name)), e.type === 'l' ? null : e.type, e.size, e.modifyTime);
         }
-      } else if (t === '-' || t === 'l') files.push({ rp, lp, size: sizeHint || 0 });
+      } else if (t === '-' || t === 'l') files.push({ rp, lp, size: sizeHint || 0, mtime: mtimeHint || 0 });
     };
     for (const rp of remotePaths) {
       const r = norm(rp);
@@ -250,11 +250,17 @@ async function download(id, remotePaths) {
   let done = 0;
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    ctx.send('progress', { text: `Wird vom Server geladen (${i + 1}/${files.length}): ${posix.basename(f.rp)}`, percent: total ? Math.round((done / total) * 100) : Math.round((i / files.length) * 100) });
+    ctx.send('progress', { text: `${verb || 'Wird vom Server geladen'} (${i + 1}/${files.length}): ${posix.basename(f.rp)}`, percent: total ? Math.round((done / total) * 100) : Math.round((i / files.length) * 100) });
     fs.mkdirSync(path.dirname(f.lp), { recursive: true });
     await transfer(id, 'get', f.rp, f.lp, f.rp);
-    try { done += fs.statSync(f.lp).size; } catch { /* egal */ }
+    try {
+      const size = fs.statSync(f.lp).size;
+      done += size;
+      // Stand merken: beim späteren Hochladen werden nur geänderte Dateien übertragen
+      if (f.mtime && size === f.size) stateLoad()[skey(id, f.rp)] = { size, mtime: f.mtime, md5: await md5File(f.lp) };
+    } catch { /* egal */ }
   }
+  stateSave();
   return { paths: results.filter((p) => fs.existsSync(p)), files: files.length, bytes: done, localRoot: local };
 }
 
@@ -264,39 +270,204 @@ async function exists(id, remoteDir, name) {
   return wrap(id, async (c) => !!(await c.exists(posix.join(norm(remoteDir), name))));
 }
 
-/** Lokalen Resource-Ordner hochladen nach remoteDir/<ordnername> (vorhandener Ordner wird ersetzt). */
+// ---------------------------------------------------------------- Abgleich beim Hochladen
+// Stand der Server-Dateien (Größe, Zeitstempel, MD5) aus Import und letztem Upload –
+// damit beim Export nur wirklich geänderte Dateien übertragen werden.
+let stateCache = null;
+function stateLoad() {
+  if (stateCache) return stateCache;
+  try { stateCache = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8')) || {}; } catch { stateCache = {}; }
+  return stateCache;
+}
+function stateSave() { if (!ctx.stateFile || !stateCache) return; try { fs.writeFileSync(ctx.stateFile, JSON.stringify(stateCache)); } catch { /* egal */ } }
+const skey = (id, rp) => `${id}|${rp}`;
+function md5File(f) {
+  return new Promise((res, rej) => {
+    const h = crypto.createHash('md5');
+    fs.createReadStream(f).on('data', (d) => h.update(d)).on('end', () => res(h.digest('hex'))).on('error', rej);
+  });
+}
+const localKey = (rel) => rel.split('/').map(safeLocal).join('/');
+
+/** Alle Dateien unter root (relativer Pfad → Infos). */
+async function remoteTree(c, root) {
+  const out = new Map();
+  const walk = async (rp, rel) => {
+    for (const e of await c.list(rp)) {
+      if (e.name === '.' || e.name === '..') continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.type === 'd') await walk(posix.join(rp, e.name), r);
+      else out.set(r, { rp: posix.join(rp, e.name), size: e.size, mtime: e.modifyTime });
+    }
+  };
+  await walk(root, '');
+  return out;
+}
+
+/** MD5 direkt auf dem Server (nur wenn der Server Befehle erlaubt) – sonst null. */
+async function remoteMd5(c, paths) {
+  const ssh = c && c.client;
+  if (!ssh || typeof ssh.exec !== 'function' || !paths.length) return null;
+  const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+  const result = new Map();
+  for (let i = 0; i < paths.length; i += 40) {
+    const batch = paths.slice(i, i + 40);
+    const out = await new Promise((res) => {
+      const timer = setTimeout(() => res(null), 30000);
+      try {
+        ssh.exec(`md5sum -- ${batch.map(q).join(' ')}`, (err, stream) => {
+          if (err) { clearTimeout(timer); return res(null); }
+          let o = '';
+          stream.on('data', (d) => { o += d; });
+          stream.stderr.on('data', () => {});
+          stream.on('close', () => { clearTimeout(timer); res(o); });
+        });
+      } catch { clearTimeout(timer); res(null); }
+    });
+    if (out === null) return result.size ? result : null;
+    for (const line of out.split('\n')) {
+      const m = /^\\?([0-9a-f]{32})\s+\*?(.+)$/.exec(line.trim());
+      if (m) result.set(m[2], m[1]);
+    }
+    if (i === 0 && !result.size) return null;
+  }
+  return result;
+}
+
+/**
+ * Lokalen Resource-Ordner nach remoteDir/<ordnername> hochladen – mit Abgleich:
+ * nur neue und geänderte Dateien werden übertragen; Dateien, die es beim Import gab und die jetzt fehlen
+ * (im Tool gelöscht), werden auf dem Server entfernt. Unbekannte Dateien auf dem Server bleiben unangetastet.
+ * Alles, was überschrieben oder gelöscht wird, wird vorher lokal gesichert.
+ */
 async function upload(id, localFolder, remoteDir) {
   if (!fs.existsSync(localFolder)) throw new Error('Der exportierte Ordner fehlt.');
   const name = path.basename(localFolder);
-  const files = [];
-  const target = await wrap(id, async (c) => {
-    const base = await c.realPath(norm(remoteDir || '.'));
-    const t = posix.join(base, name);
-    if ((await c.exists(base)) !== 'd') await c.mkdir(base, true);
-    if (await c.exists(t)) {
-      ctx.send('progress', { text: 'Alte Version auf dem Server wird entfernt …', percent: -1 });
-      await c.rmdir(t, true);
+  const state = stateLoad();
+
+  // Lokale Dateien + Prüfsummen
+  const local = [];
+  const walkLocal = (lp, rel) => {
+    for (const e of fs.readdirSync(lp, { withFileTypes: true })) {
+      const l = path.join(lp, e.name), r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walkLocal(l, r); else local.push({ l, rel: r, size: fs.statSync(l).size });
     }
-    const walk = (lp, rp) => {
-      for (const e of fs.readdirSync(lp, { withFileTypes: true })) {
-        const l = path.join(lp, e.name), r = posix.join(rp, e.name);
-        if (e.isDirectory()) walk(l, r); else files.push({ l, r });
-      }
-    };
-    walk(localFolder, t);
-    const dirs = [...new Set(files.map((f) => posix.dirname(f.r)))].sort();
-    for (const d of dirs) await c.mkdir(d, true);
-    return t;
-  });
-  const total = files.reduce((a, f) => a + fs.statSync(f.l).size, 0) || 1;
-  let done = 0;
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    ctx.send('progress', { text: `Wird hochgeladen (${i + 1}/${files.length}): ${path.basename(f.l)}`, percent: Math.round((done / total) * 100) });
-    await transfer(id, 'put', f.l, f.r, f.r);
-    done += fs.statSync(f.l).size;
+  };
+  walkLocal(localFolder, '');
+  for (let i = 0; i < local.length; i++) {
+    if (i % 25 === 0) ctx.send('progress', { text: `Dateien werden verglichen (${i + 1}/${local.length}) …`, percent: Math.round((i / local.length) * 100) });
+    local[i].md5 = await md5File(local[i].l);
   }
-  return { remote: target, files: files.length, bytes: done };
+
+  // Server-Stand
+  ctx.send('progress', { text: 'Server-Stand wird gelesen …', percent: -1 });
+  const { t, tree } = await wrap(id, async (c) => {
+    const base = await c.realPath(norm(remoteDir || '.'));
+    if ((await c.exists(base)) !== 'd') await c.mkdir(base, true);
+    const tt = posix.join(base, name);
+    const ex = await c.exists(tt);
+    if (ex && ex !== 'd') throw new Error(`Auf dem Server gibt es schon eine Datei namens „${name}“.`);
+    return { t: tt, tree: ex === 'd' ? await remoteTree(c, tt) : new Map() };
+  });
+  const remoteByKey = new Map();
+  for (const [rel, info] of tree) remoteByKey.set(localKey(rel), info);
+
+  // Vergleichen
+  const unsure = [];
+  for (const f of local) {
+    const r = remoteByKey.get(f.rel);
+    f.rp = r ? r.rp : posix.join(t, f.rel);
+    f.r = r;
+    if (!r) { f.action = 'new'; continue; }
+    if (r.size !== f.size) { f.action = 'changed'; continue; }
+    const s = state[skey(id, r.rp)];
+    if (s && s.md5 && s.size === r.size && s.mtime === r.mtime) { f.action = s.md5 === f.md5 ? 'same' : 'changed'; continue; }
+    unsure.push(f);
+  }
+  if (unsure.length) {
+    ctx.send('progress', { text: `${unsure.length} Dateien werden auf dem Server geprüft …`, percent: -1 });
+    let sums = null;
+    try { sums = await wrap(id, (c) => remoteMd5(c, unsure.map((f) => f.rp))); } catch { sums = null; }
+    for (const f of unsure) {
+      const h = sums && sums.get(f.rp);
+      f.action = h ? (h === f.md5 ? 'same' : 'changed') : 'changed';
+    }
+  }
+  const localKeys = new Set(local.map((f) => f.rel));
+  const toDelete = [], untouched = [];
+  for (const [rel, r] of tree) {
+    if (localKeys.has(localKey(rel))) continue;
+    if (state[skey(id, r.rp)]) toDelete.push({ ...r, rel }); else untouched.push(rel);
+  }
+  const toPut = local.filter((f) => f.action !== 'same');
+  const unchanged = local.length - toPut.length;
+
+  // Sicherung von allem, was überschrieben oder gelöscht wird
+  let backup = null;
+  const risky = [...toPut.filter((f) => f.r).map((f) => ({ rp: f.rp, rel: f.rel })), ...toDelete.map((d) => ({ rp: d.rp, rel: localKey(d.rel) }))];
+  if (risky.length && ctx.backupRoot) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const dir = path.join(ctx.backupRoot, `${name}_${stamp}`);
+    try {
+      for (let i = 0; i < risky.length; i++) {
+        const b = risky[i];
+        ctx.send('progress', { text: `Server-Version wird gesichert (${i + 1}/${risky.length}): ${posix.basename(b.rp)}`, percent: Math.round((i / risky.length) * 100) });
+        const lp = path.join(dir, name, ...b.rel.split('/'));
+        fs.mkdirSync(path.dirname(lp), { recursive: true });
+        await transfer(id, 'get', b.rp, lp, b.rp);
+      }
+      backup = path.join(dir, name);
+      pruneBackups(name);
+    } catch (e) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* egal */ }
+      throw new Error(`Die Server-Version konnte nicht gesichert werden – es wurde nichts verändert. (${e.message})`);
+    }
+  }
+
+  // Hochladen
+  if (toPut.length) {
+    await wrap(id, async (c) => {
+      const dirs = [...new Set(toPut.map((f) => posix.dirname(f.rp)))].sort();
+      for (const d of dirs) if ((await c.exists(d)) !== 'd') await c.mkdir(d, true);
+    });
+  }
+  const total = toPut.reduce((a, f) => a + f.size, 0) || 1;
+  let done = 0;
+  for (let i = 0; i < toPut.length; i++) {
+    const f = toPut[i];
+    ctx.send('progress', { text: `Wird hochgeladen (${i + 1}/${toPut.length}): ${path.basename(f.l)}`, percent: Math.round((done / total) * 100) });
+    await transfer(id, 'put', f.l, f.rp, f.rp);
+    done += f.size;
+  }
+
+  // Löschen + Stand merken
+  await wrap(id, async (c) => {
+    for (const d of toDelete) {
+      ctx.send('progress', { text: `Auf dem Server gelöscht: ${posix.basename(d.rp)}`, percent: -1 });
+      try { await c.delete(d.rp); } catch { /* schon weg */ }
+      delete state[skey(id, d.rp)];
+    }
+    for (const f of local) {
+      let size = f.r ? f.r.size : f.size, mtime = f.r ? f.r.mtime : 0;
+      if (f.action !== 'same') {
+        try { const st = await c.stat(f.rp); size = st.size; mtime = st.modifyTime; } catch { continue; }
+      }
+      state[skey(id, f.rp)] = { size, mtime, md5: f.md5 };
+    }
+  });
+  stateSave();
+  return {
+    remote: t, files: toPut.length, uploaded: toPut.length, newFiles: toPut.filter((f) => !f.r).length,
+    unchanged, deleted: toDelete.length, untouched, bytes: done, backup,
+  };
+}
+
+/** Pro Resource nur die letzten 5 Server-Sicherungen behalten. */
+function pruneBackups(name) {
+  try {
+    const all = fs.readdirSync(ctx.backupRoot).filter((d) => d.startsWith(name + '_') && /_\d{4}-\d\d-\d\dT/.test(d.slice(name.length))).sort();
+    for (const d of all.slice(0, Math.max(0, all.length - 5))) fs.rmSync(path.join(ctx.backupRoot, d), { recursive: true, force: true });
+  } catch { /* egal */ }
 }
 
 /** Gespeichertes Geheimnis (nur im Hauptprozess, z. B. für „Verbindung testen“ beim Bearbeiten). */

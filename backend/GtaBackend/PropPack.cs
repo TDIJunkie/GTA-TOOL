@@ -133,6 +133,7 @@ public static class PropPack
             ytyps = files.Where(f => f.EndsWith(".ytyp", StringComparison.OrdinalIgnoreCase)).Select(f => "stream/" + f).ToList(),
             missingArchetypes = noArch,
             warnings,
+            original = Session.FindOriginal(sessionDir)?.Name,
         };
     }
 
@@ -449,8 +450,8 @@ public static class PropPack
 
     public static object Export(string sessionDir, string outDir, string resourceName, bool testCommand, string backupDir)
     {
-        resourceName = Session.SafeName(string.IsNullOrWhiteSpace(resourceName) ? "props" : resourceName);
-        var ensured = EnsureArchetypes(sessionDir, resourceName, backupDir);
+        resourceName = ExportMerge.ResName(string.IsNullOrWhiteSpace(resourceName) ? "props" : resourceName);
+        var ensured = EnsureArchetypes(sessionDir, Session.SafeName(resourceName), backupDir);
         var res = Path.Combine(outDir, resourceName);
         if (Directory.Exists(res) && Directory.EnumerateFileSystemEntries(res).Any())
         {
@@ -458,9 +459,9 @@ public static class PropPack
             Directory.Delete(res, true);
         }
         var s = Stream(sessionDir);
+        var warnings = new List<string>();
         var outStream = Path.Combine(res, "stream");
         Directory.CreateDirectory(outStream);
-        var warnings = new List<string>();
         int n = 0;
         foreach (var f in Directory.GetFiles(s))
         {

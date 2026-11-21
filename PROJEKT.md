@@ -261,6 +261,23 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
   Überschreiben, Host-Key-Wechsel, Verbindungsabbruch mitten im Download (Neuversuch); kompletter Ablauf über die Oberfläche.
   Übertragung schonend (4 parallele Anfragen), bei Fehler Neuverbindung + sequenziell (Fix für „No response from server“ beim Nutzer).
   Schlüsseldatei-Anmeldung noch ungetestet.
+- [x] **Fix 21.11.2026 – Original-Resource bleibt erhalten** (Nutzer: MLO vom Server, Textur geändert, hochgeladen → kaputt).
+      Ursache: MLO-/Prop-Export baute eine neue Minimal-Resource (nur flaches `stream/` + eigenes fxmanifest) und der Upload löschte
+      die Server-Version → `fxmanifest.lua`, `client.lua`, Metas, Unterordner (`stream/ytyp/…`) weg. Jetzt: `Session.Open` sichert beim
+      Öffnen eines Ordners alle Nicht-stream-Dateien nach `original/<quelle>` (+ `originals.json`); `Session.ExportPreserving` stellt die
+      Resource 1:1 wieder her und legt Sitzungsdateien an ihren Ursprungspfad (Index-Origin), neue nach `stream/`, gelöschte fehlen.
+- [x] **Alle Studios: Original erhalten + Abgleich-Upload** (Wunsch Nutzer 21.11.2026):
+      `ExportMerge.Run` (Program.cs) umschließt alle fünf Exporte: Studio exportiert in Zwischenordner, danach Einsortieren in die
+      Original-Resource (Sitzungsdatei → Index-Origin, sonst gleicher Dateiname, sonst neu; Original-Dateinamen exakt). fxmanifest bleibt,
+      nur Einträge für wirklich neue Dateien werden ergänzt; erzeugte .lua/LIESMICH werden nicht übernommen. Resources mit .rpf: alter Weg.
+      Name exakt (`ExportMerge.ResName` = `safeResourceName` in main.js: nur ordner-unzulässige Zeichen ersetzt, Groß/klein bleibt);
+      Dialoge schlagen den Original-Namen vor (`session:original`, `Sftp.originalName/keepNotice`).
+      SFTP-Upload (`sftp.upload`): Stand je Server-Datei (Größe, mtime, MD5) aus Import/Upload in `%APPDATA%\GTA Tool\sftp-stand.json`;
+      nur neue/geänderte Dateien hochladen (unklar → `md5sum` per SSH, sonst hochladen), beim Import bekannte und jetzt fehlende Dateien
+      löschen, unbekannte Server-Dateien nicht anfassen (werden gemeldet). Vorher Sicherung nur der überschriebenen/gelöschten Dateien
+      nach `%APPDATA%\GTA Tool\server-sicherungen` (letzte 5 je Resource); scheitert sie, wird nichts verändert.
+      Getestet: Import per Test-SFTP → Änderung/Löschen/Neu → Upload 2 Dateien + 1 gelöscht, 209 übersprungen; zweiter Upload 0;
+      unveränderter Rundlauf aller Studios (diabli, jobwesten, cwalk, mlo_cafecute) ohne Verluste. Kleidung erzeugt .ymt/.meta immer neu.
 
 ### Stand 20.11.2026 (4) – Prop Studio (Version 0.3.0)
 

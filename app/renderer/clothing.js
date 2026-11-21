@@ -560,7 +560,8 @@ const ClothingStudio = (() => {
     if (!S.model) return;
     const settings = await call('settings:get');
     const defName = (S.model.collections[0] && S.model.collections[0].name.replace(/^mp_[mf]_/, '')) || 'kleidung';
-    const nameIn = h('input', { type: 'text', value: defName });
+    const orig = await Sftp.originalName();
+    const nameIn = h('input', { type: 'text', value: orig || defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
       onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; },
@@ -570,6 +571,7 @@ const ClothingStudio = (() => {
       title: 'Kleidung als FiveM-Resource exportieren',
       body: h('div',
         h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit Modellen/Texturen, YMT und Shop-Meta je Sammlung, fxmanifest.lua.'),
+        Sftp.keepNotice(orig),
         h('div.field', h('label', 'Name der Resource'), nameIn),
         target.el,
         localField),

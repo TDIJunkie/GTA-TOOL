@@ -46,6 +46,7 @@ public static class Session
             {
                 var src = SafeName(Path.GetFileName(path));
                 Program.Progress($"Ordner {Path.GetFileName(path)} wird gelesen …");
+                SaveOriginal(path, src, sessionDir);
                 foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
                 {
                     var rel = Path.GetRelativePath(path, f);
@@ -69,6 +70,73 @@ public static class Session
         if (added == 0) warnings.Add("Es wurden keine verwendbaren GTA-Dateien gefunden.");
         var model = Analyze(sessionDir);
         return new { added, warnings, model };
+    }
+
+    // ------------------------------------------------------------------ Original-Resource erhalten
+
+    /// <summary>
+    /// Merkt sich alle Dateien eines geöffneten Ordners, die nicht in stream\ landen
+    /// (fxmanifest.lua, Lua-Skripte, .fxap, Metas, Audio …), unter original\&lt;quelle&gt;\.
+    /// Beim Export wird daraus die Resource 1:1 wiederhergestellt – nur geänderte Dateien werden ersetzt.
+    /// </summary>
+    static void SaveOriginal(string path, string src, string sessionDir)
+    {
+        var root = Path.Combine(sessionDir, "original", src);
+        try
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            // Resources mit .rpf (z. B. dlc.rpf) werden beim Export in lose Dateien umgewandelt – dort gibt es kein 1:1-Original.
+            if (Directory.EnumerateFiles(path, "*.rpf", SearchOption.AllDirectories).Any()) return;
+            foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                if (StreamExt.Contains(Path.GetExtension(f)) || f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase)) continue;
+                var rel = Path.GetRelativePath(path, f);
+                if (rel.Split('\\', '/').Any(p => p.Equals(".git", StringComparison.OrdinalIgnoreCase) || p.Equals("node_modules", StringComparison.OrdinalIgnoreCase))) continue;
+                var target = Path.Combine(root, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(f, target, true);
+            }
+            var listFile = Path.Combine(sessionDir, "originals.json");
+            var list = File.Exists(listFile) ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(listFile)) ?? new() : new();
+            list[src] = Path.GetFileName(path);
+            File.WriteAllText(listFile, JsonSerializer.Serialize(list));
+        }
+        catch { /* ohne Original geht der Export wie bisher */ }
+    }
+
+    public class OriginalResource
+    {
+        public string Name;     // ursprünglicher Ordnername der Resource
+        public string Dir;      // Kopie der Nicht-stream-Dateien (Wurzel der Resource)
+        public string Prefix;   // Herkunfts-Präfix in index.json („ordner/unterordner“)
+    }
+
+    /// <summary>Genau eine geöffnete Original-Resource (mit fxmanifest.lua) – sonst null.</summary>
+    public static OriginalResource FindOriginal(string sessionDir)
+    {
+        var listFile = Path.Combine(sessionDir, "originals.json");
+        if (!File.Exists(listFile)) return null;
+        Dictionary<string, string> list;
+        try { list = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(listFile)) ?? new(); } catch { return null; }
+        var found = new List<OriginalResource>();
+        foreach (var (src, folder) in list)
+        {
+            var root = Path.Combine(sessionDir, "original", src);
+            if (!Directory.Exists(root)) continue;
+            foreach (var m in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                         .Where(f => Path.GetFileName(f).Equals("fxmanifest.lua", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("__resource.lua", StringComparison.OrdinalIgnoreCase)))
+            {
+                var dir = Path.GetDirectoryName(m)!;
+                var relDir = Path.GetRelativePath(root, dir).Replace('\\', '/');
+                found.Add(new OriginalResource
+                {
+                    Name = relDir == "." ? folder : Path.GetFileName(dir),
+                    Dir = dir,
+                    Prefix = relDir == "." ? folder : folder + "/" + relDir,
+                });
+            }
+        }
+        return found.Count == 1 ? found[0] : null;
     }
 
     static string RpfSourceName(string rpfPath, string root)

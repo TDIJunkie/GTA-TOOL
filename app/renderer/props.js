@@ -566,7 +566,8 @@ const PropStudio = (() => {
     if (!S.model) return;
     const settings = await call('settings:get');
     const defName = (S.model.ytyps[0] && base(S.model.ytyps[0]).replace(/\.ytyp$/, '')) || (S.model.props.length === 1 ? S.model.props[0].name : 'props');
-    const nameIn = h('input', { type: 'text', value: defName });
+    const orig = S.model.original || await Sftp.originalName();
+    const nameIn = h('input', { type: 'text', value: orig || defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const testCmd = h('input', { type: 'checkbox', checked: true });
     const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
@@ -576,11 +577,13 @@ const PropStudio = (() => {
     modal({
       title: 'Props als FiveM-Resource exportieren',
       body: h('div',
-        h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit Modellen, Texturen und .ytyp, fxmanifest.lua (mit DLC_ITYP_REQUEST) und LIESMICH.txt. Fehlende Archetypen werden automatisch angelegt.'),
+        orig
+          ? Sftp.keepNotice(orig)
+          : h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit Modellen, Texturen und .ytyp, fxmanifest.lua (mit DLC_ITYP_REQUEST) und LIESMICH.txt. Fehlende Archetypen werden automatisch angelegt.'),
         h('div.field', h('label', 'Name der Resource'), nameIn),
         target.el,
         localField,
-        h('label.check', testCmd, ' Test-Befehl einbauen (', h('code', '/spawnprop name'), ' und ', h('code', '/delprops'), ')')),
+        orig ? null : h('label.check', testCmd, ' Test-Befehl einbauen (', h('code', '/spawnprop name'), ' und ', h('code', '/delprops'), ')')),
       buttons: [
         { label: 'Abbrechen' },
         {
@@ -588,7 +591,7 @@ const PropStudio = (() => {
           onClick: async () => {
             const resourceName = nameIn.value.trim();
             const r = await Sftp.runExport(target.get(), resourceName,
-              (outDir) => call('prop:export', { outDir, resourceName, testCommand: testCmd.checked }, { busyText: 'Resource wird erstellt …' }));
+              (outDir) => call('prop:export', { outDir, resourceName, testCommand: !orig && testCmd.checked }, { busyText: 'Resource wird erstellt …' }));
             if (!r) return true;
             S.model = r.model; S.dirty = false; renderAll(true);
             modal({
@@ -598,7 +601,7 @@ const PropStudio = (() => {
                 r.addedArchetypes && r.addedArchetypes.added.length ? h('div.notice.info', `Automatisch angelegte Archetypen: ${r.addedArchetypes.added.join(', ')}`) : null,
                 r.warnings.length ? h('div.notice.warn', h('ul', r.warnings.map((w) => h('li', w)))) : null,
                 h('div.notice.info', r.remote ? 'server.cfg: ' : 'Ordner nach „resources“ kopieren → server.cfg: ', h('code', `ensure ${base(r.folder)}`),
-                  testCmd.checked ? h('span', ' · Im Spiel testen: ', h('code', '/spawnprop name')) : null)),
+                  !orig && testCmd.checked ? h('span', ' · Im Spiel testen: ', h('code', '/spawnprop name')) : null)),
               buttons: Sftp.resultButtons(r),
             });
             return false;

@@ -531,7 +531,8 @@ const AnimStudio = (() => {
     if (!S.model) return;
     const settings = await call('settings:get');
     const defName = (S.model.dicts[0] && S.model.dicts[0].name.replace(/[^a-z0-9_-]/gi, '_')) || 'animationen';
-    const nameIn = h('input', { type: 'text', value: defName });
+    const orig = await Sftp.originalName();
+    const nameIn = h('input', { type: 'text', value: orig || defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const testCmd = h('input', { type: 'checkbox', checked: true });
     const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
@@ -542,6 +543,7 @@ const AnimStudio = (() => {
       title: 'Animationen als FiveM-Resource exportieren',
       body: h('div',
         h('p.muted', 'Erstellt eine fertige Resource: stream-Ordner mit allen .ycd-Dateien, fxmanifest.lua und LIESMICH.txt mit allen Datei- und Clip-Namen.'),
+        Sftp.keepNotice(orig),
         h('div.field', h('label', 'Name der Resource'), nameIn),
         target.el,
         localField,

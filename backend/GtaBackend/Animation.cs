@@ -577,7 +577,7 @@ public static class Animations
 
     public static object Export(string sessionDir, string outDir, string resourceName, bool testCommand)
     {
-        var safe = Session.SafeName(string.IsNullOrWhiteSpace(resourceName) ? "animationen" : resourceName);
+        var safe = ExportMerge.ResName(string.IsNullOrWhiteSpace(resourceName) ? "animationen" : resourceName);
         var root = Path.Combine(outDir, safe);
         if (Directory.Exists(root)) Directory.Delete(root, true);
         var stream = Path.Combine(root, "stream");

@@ -265,7 +265,7 @@ const Sftp = (() => {
       if (!target.remoteDir) { toast('Bitte den Zielordner auf dem Server angeben.', 'warn'); return null; }
       const ex = await call('sftp:exists', { id: target.id, remoteDir: target.remoteDir, resourceName }, { busyText: 'Server wird geprüft …' });
       if (ex === null) return null;
-      if (ex && !await UI.confirm('Auf dem Server überschreiben?', `Im Ordner ${target.remoteDir} gibt es schon eine Resource mit diesem Namen. Sie wird komplett ersetzt.`, 'Überschreiben', { danger: true })) return null;
+      if (ex && !await UI.confirm('Auf dem Server aktualisieren?', `Im Ordner ${target.remoteDir} gibt es schon eine Resource mit diesem Namen. Es werden nur geänderte Dateien hochgeladen; im Tool gelöschte Dateien werden entfernt. Alles, was überschrieben oder gelöscht wird, wird vorher auf deinem PC gesichert.`, 'Aktualisieren')) return null;
       const stage = await call('sftp:stage');
       if (!stage) return null;
       const r = await doExport(stage);
@@ -273,7 +273,7 @@ const Sftp = (() => {
       const up = await call('sftp:upload', { id: target.id, local: r.folder, remoteDir: target.remoteDir }, { busyText: 'Wird auf den Server hochgeladen …' });
       if (!up) { toast('Der Export wurde erstellt, aber das Hochladen ist fehlgeschlagen.', 'error'); return null; }
       const s = (await servers()).find((x) => x.id === target.id);
-      return { ...r, remote: up.remote, server: s ? s.name : '', uploaded: up.files };
+      return { ...r, remote: up.remote, server: s ? s.name : '', uploaded: up.uploaded, newFiles: up.newFiles, unchanged: up.unchanged, deleted: up.deleted, untouched: up.untouched || [], backup: up.backup || null };
     }
     if (!target.dir) { toast('Bitte einen Zielordner wählen.', 'warn'); return null; }
     if (await call('fivem:exists', { outDir: target.dir, resourceName })) {
@@ -284,13 +284,33 @@ const Sftp = (() => {
 
   /** Ergebnis-Zeile für Export-Dialoge: lokaler Ordner oder Server-Pfad. */
   function resultPath(r) {
-    return r.remote ? h('p', '🌐 Hochgeladen auf ', h('b', r.server || 'Server'), ': ', h('code', r.remote)) : h('p', h('code', r.folder));
+    if (!r.remote) return h('p', h('code', r.folder));
+    return h('div',
+      h('p', '🌐 Server ', h('b', r.server || 'Server'), ': ', h('code', r.remote)),
+      h('p', r.uploaded || r.deleted
+        ? `⬆ ${r.uploaded} Datei(en) hochgeladen (${r.newFiles || 0} neu, ${r.uploaded - (r.newFiles || 0)} geändert) · ${r.unchanged || 0} unverändert übersprungen${r.deleted ? ` · ${r.deleted} gelöscht` : ''}`
+        : `✓ Auf dem Server war schon alles aktuell – nichts hochgeladen (${r.unchanged || 0} Dateien geprüft).`),
+      r.untouched && r.untouched.length
+        ? h('div.notice.warn', `${r.untouched.length} Datei(en) auf dem Server gehören nicht zu diesem Export und wurden nicht angetastet: `, h('code', r.untouched.slice(0, 6).join(', ') + (r.untouched.length > 6 ? ' …' : '')))
+        : null,
+      r.backup ? h('p.muted', '💾 Die vorherige Server-Version wurde gesichert: ', h('code', r.backup)) : null);
   }
   function resultButtons(r) {
     return r.remote
-      ? [{ label: 'Schließen', primary: true }]
+      ? [...(r.backup ? [{ label: '💾 Sicherung öffnen', onClick: () => { call('shell:open', { target: r.backup }); return false; } }] : []), { label: 'Schließen', primary: true }]
       : [{ label: 'Schließen' }, { label: '📂 Ordner öffnen', primary: true, onClick: () => call('shell:open', { target: r.folder }) }];
   }
 
-  return { manage, browse, importTo, targetField, runExport, resultPath, resultButtons };
+  /** Name der geöffneten Original-Resource (Ordner mit fxmanifest.lua) oder null. */
+  async function originalName() {
+    try { const r = await call('session:original', {}); return (r && r.name) || null; } catch { return null; }
+  }
+  /** Hinweis im Export-Dialog, wenn eine Original-Resource erhalten bleibt. */
+  function keepNotice(orig) {
+    return orig
+      ? h('div.notice.info', '♻ Die Original-Resource „', h('b', orig), '“ bleibt erhalten: gleicher Name, gleiche Ordner und Dateinamen, fxmanifest.lua und Skripte. Nur deine Änderungen werden übernommen – auf den Server werden nur geänderte Dateien hochgeladen.')
+      : null;
+  }
+
+  return { manage, browse, importTo, targetField, runExport, resultPath, resultButtons, originalName, keepNotice };
 })();

@@ -807,14 +807,17 @@ const MloStudio = (() => {
     if (!S.model) return;
     const settings = await call('settings:get');
     const m = S.model.mlos[0];
-    const nameIn = h('input', { type: 'text', value: m ? m.name.replace(/_collision$/, '') : 'interior' });
+    const orig = S.model.original || await Sftp.originalName();
+    const nameIn = h('input', { type: 'text', value: orig || (m ? m.name.replace(/_collision$/, '') : 'interior') });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', { onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) dirIn.value = r[0]; } }, 'Durchsuchen …')));
     const target = Sftp.targetField(localField, dirIn);
     modal({
       title: 'Interior als FiveM-Resource exportieren',
       body: h('div',
-        h('p.muted', 'Erstellt eine fertige Map-Resource: alle Dateien im stream-Ordner, fxmanifest.lua mit „this_is_a_map“.'),
+        orig
+          ? Sftp.keepNotice(orig)
+          : h('p.muted', 'Erstellt eine fertige Map-Resource: alle Dateien im stream-Ordner, fxmanifest.lua mit „this_is_a_map“.'),
         h('div.field', h('label', 'Name der Resource'), nameIn),
         target.el,
         localField),

@@ -151,7 +151,8 @@ public static class Mlo
         var ymaps = files.Where(f => f.EndsWith(".ymap")).Select(f => "stream/" + f).OrderBy(x => x).ToList();
         var ytypsList = files.Where(f => f.EndsWith(".ytyp")).Select(f => "stream/" + f).OrderBy(x => x).ToList();
         foreach (var m in models.Where(m => m.encrypted)) warnings.Add($"{Path.GetFileName(m.file)} ist verschlüsselt (Escrow).");
-        return new { sessionDir, mlos, models, ytds, collisions, ymaps, ytyps = ytypsList, warnings };
+        var original = Session.FindOriginal(sessionDir)?.Name;
+        return new { sessionDir, mlos, models, ytds, collisions, ymaps, ytyps = ytypsList, warnings, original };
     }
 
     // ------------------------------------------------------------------ Szene eines MLO
@@ -528,18 +529,18 @@ public static class Mlo
 
     public static object Export(string sessionDir, string outDir, string resourceName)
     {
-        resourceName = Session.SafeName(resourceName);
+        resourceName = ExportMerge.ResName(resourceName);
         var res = Path.Combine(outDir, resourceName);
         if (Directory.Exists(res) && Directory.EnumerateFileSystemEntries(res).Any())
         {
             if (!File.Exists(Path.Combine(res, "fxmanifest.lua"))) throw new UserError($"{res} existiert schon und ist keine FiveM-Resource.");
             Directory.Delete(res, true);
         }
+        var warnings = new List<string>();
         var s = Stream(sessionDir);
         var outStream = Path.Combine(res, "stream");
         Directory.CreateDirectory(outStream);
         int n = 0;
-        var warnings = new List<string>();
         foreach (var f in Directory.GetFiles(s))
         {
             File.Copy(f, Path.Combine(outStream, Path.GetFileName(f)), true);

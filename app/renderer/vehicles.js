@@ -1046,10 +1046,11 @@ const VehicleStudio = (() => {
     if (!S.model) return;
     const settings = await call('settings:get');
     const defName = S.model.vehicles.length === 1 ? S.model.vehicles[0].model : (S.model.sources[0] || 'fahrzeuge');
-    const nameIn = h('input', { type: 'text', value: defName });
+    const orig = await Sftp.originalName();
+    const nameIn = h('input', { type: 'text', value: orig || defName });
     const dirIn = h('input', { type: 'text', value: (settings && (settings.lastResourceDir || settings.lastExportDir)) || '', placeholder: 'Bitte Ordner wählen …' });
     const preview = h('div.hint');
-    const upd = () => { preview.textContent = dirIn.value ? `Wird erstellt: ${dirIn.value.replace(/[\\/]$/, '')}\\${nameIn.value.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}` : ''; };
+    const upd = () => { preview.textContent = dirIn.value ? `Wird erstellt: ${dirIn.value.replace(/[\\/]$/, '')}\\${nameIn.value.trim().replace(/[^\x21-\x7E]|[<>:"/\\|?*]/g, '_').replace(/\.+$/, '')}` : ''; };
     nameIn.addEventListener('input', upd); dirIn.addEventListener('input', upd); upd();
     const localField = h('div.field', h('label', 'Zielordner'), h('div.input-row', dirIn, h('button.btn', {
       onclick: async () => { const r = await call('dialog:open', { kind: 'outdir' }); if (r && r[0]) { dirIn.value = r[0]; upd(); } },
@@ -1059,7 +1060,8 @@ const VehicleStudio = (() => {
       title: 'Als FiveM-Resource exportieren',
       body: h('div',
         h('p.muted', 'Erstellt einen fertigen Resource-Ordner (fxmanifest.lua, stream, data) – auf deinem PC oder direkt auf deinem Server. Danach in der server.cfg „ensure <name>“ eintragen.'),
-        h('div.field', h('label', 'Name der Resource'), nameIn, h('div.hint', 'Nur Kleinbuchstaben, Zahlen, „_“ und „-“.')),
+        Sftp.keepNotice(orig),
+        h('div.field', h('label', 'Name der Resource'), nameIn, h('div.hint', orig ? 'Gleicher Name = die Resource wird aktualisiert. Anderer Name = neue Resource.' : 'Am besten nur Buchstaben, Zahlen, „_“ und „-“.')),
         target.el,
         localField),
       buttons: [

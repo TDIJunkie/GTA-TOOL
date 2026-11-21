@@ -18,7 +18,7 @@ public static class FiveMExport
 
     public static object Export(string sessionDir, string outDir, string resourceName)
     {
-        resourceName = Session.SafeName(resourceName);
+        resourceName = ExportMerge.ResName(resourceName);
         if (string.IsNullOrEmpty(outDir)) throw new UserError("Bitte einen Zielordner wählen.");
         var res = Path.Combine(outDir, resourceName);
         if (Directory.Exists(res) && Directory.EnumerateFileSystemEntries(res).Any())
