@@ -447,6 +447,12 @@ async function upload(id, localFolder, remoteDir) {
       try { await c.delete(d.rp); } catch { /* schon weg */ }
       delete state[skey(id, d.rp)];
     }
+    // dadurch leer gewordene Ordner entfernen (tiefste zuerst, nie den Resource-Ordner selbst)
+    const emptied = new Set();
+    for (const d of toDelete) for (let p = posix.dirname(d.rp); p.length > t.length && p.startsWith(t + '/'); p = posix.dirname(p)) emptied.add(p);
+    for (const p of [...emptied].sort((a, b) => b.length - a.length)) {
+      try { if (!(await c.list(p)).some((e) => e.name !== '.' && e.name !== '..')) await c.rmdir(p); } catch { /* egal */ }
+    }
     for (const f of local) {
       let size = f.r ? f.r.size : f.size, mtime = f.r ? f.r.mtime : 0;
       if (f.action !== 'same') {

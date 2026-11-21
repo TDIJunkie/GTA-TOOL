@@ -225,7 +225,7 @@ const Sftp = (() => {
           if (r) { remoteIn.value = r.path; await fill(r.id); }
         },
       }, 'Durchsuchen …')),
-      h('div.hint', 'Die fertige Resource wird in diesen Ordner hochgeladen. Danach auf dem Server „ensure <name>“ eintragen bzw. „refresh“ + „ensure“.'));
+      h('div.hint', 'Den Ordner wählen, in dem die Resource liegt (z. B. resources/[mlo]) – nicht die Resource selbst. Danach auf dem Server „refresh“ + „ensure <name>“ bzw. „restart <name>“.'));
     const fill = async (selectId) => {
       const list = await servers();
       const last = (await call('sftp:last', null, { quiet: true })) || {};
@@ -234,7 +234,7 @@ const Sftp = (() => {
       const want = selectId || serverSel.dataset.cur || last.id;
       for (const s of list) serverSel.append(h('option', { value: s.id, selected: s.id === want || null }, `${s.name} (${s.host})`));
       serverSel.dataset.cur = serverSel.value;
-      if (!remoteIn.value) remoteIn.value = (last.id === serverSel.value && last.exportDir) || (list.find((s) => s.id === serverSel.value) || {}).remoteDir || '';
+      if (!remoteIn.value) remoteIn.value = (last.id === serverSel.value && (last.importDir || last.exportDir)) || (list.find((s) => s.id === serverSel.value) || {}).remoteDir || '';
     };
     serverSel.addEventListener('change', () => { serverSel.dataset.cur = serverSel.value; });
     const btns = h('div.row.gap-s');
@@ -263,6 +263,20 @@ const Sftp = (() => {
     if (target.mode === 'sftp') {
       if (!target.id) { toast('Bitte zuerst einen Server anlegen (⚙ Server verwalten).', 'warn'); return null; }
       if (!target.remoteDir) { toast('Bitte den Zielordner auf dem Server angeben.', 'warn'); return null; }
+      // Häufiger Fehler: die Resource selbst als Zielordner gewählt → es entstünde <resource>/<resource>
+      const parentOf = (p) => { const s = p.replace(/\/+$/, ''); const i = s.lastIndexOf('/'); return i > 0 ? s.slice(0, i) : '/'; };
+      const baseOf = (p) => p.replace(/\/+$/, '').split('/').pop();
+      if (baseOf(target.remoteDir) === resourceName) {
+        target.remoteDir = parentOf(target.remoteDir);
+        toast(`Zielordner korrigiert: hochgeladen wird nach ${target.remoteDir} (die Resource selbst war als Ziel gewählt).`, 'info', 9000);
+      } else {
+        const isRes = await call('sftp:exists', { id: target.id, remoteDir: target.remoteDir, resourceName: 'fxmanifest.lua' }, { busyText: 'Server wird geprüft …' });
+        if (isRes === null) return null;
+        if (isRes) {
+          if (!await UI.confirm('Zielordner ist selbst eine Resource', `„${target.remoteDir}“ enthält eine fxmanifest.lua – das ist eine Resource, kein Ordner für Resources. Die Resource „${resourceName}“ stattdessen nach „${parentOf(target.remoteDir)}“ hochladen?`, 'Ja, Ordner darüber')) return null;
+          target.remoteDir = parentOf(target.remoteDir);
+        }
+      }
       const ex = await call('sftp:exists', { id: target.id, remoteDir: target.remoteDir, resourceName }, { busyText: 'Server wird geprüft …' });
       if (ex === null) return null;
       if (ex && !await UI.confirm('Auf dem Server aktualisieren?', `Im Ordner ${target.remoteDir} gibt es schon eine Resource mit diesem Namen. Es werden nur geänderte Dateien hochgeladen; im Tool gelöschte Dateien werden entfernt. Alles, was überschrieben oder gelöscht wird, wird vorher auf deinem PC gesichert.`, 'Aktualisieren')) return null;
