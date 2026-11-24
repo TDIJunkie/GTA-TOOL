@@ -51,7 +51,10 @@ public static class Session
                 {
                     var rel = Path.GetRelativePath(path, f);
                     if (f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase))
-                        added += OpenRpf(f, sessionDir, SafeName(RpfSourceName(f, path)), index, warnings);
+                    {
+                        if (IsGtaRpf(f)) added += OpenRpf(f, sessionDir, SafeName(RpfSourceName(f, path)), index, warnings);
+                        else warnings.Add(ForeignRpfText(f));
+                    }
                     else
                         added += Take(Path.GetFileName(f), () => File.ReadAllBytes(f), $"{Path.GetFileName(path)}/{rel.Replace('\\', '/')}", src, sessionDir, index, warnings);
                 }
@@ -59,7 +62,10 @@ public static class Session
             else if (File.Exists(path))
             {
                 if (path.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase))
-                    added += OpenRpf(path, sessionDir, SafeName(RpfSourceName(path, null)), index, warnings);
+                {
+                    if (IsGtaRpf(path)) added += OpenRpf(path, sessionDir, SafeName(RpfSourceName(path, null)), index, warnings);
+                    else warnings.Add(ForeignRpfText(path));
+                }
                 else
                     added += Take(Path.GetFileName(path), () => File.ReadAllBytes(path), Path.GetFileName(path), "dateien", sessionDir, index, warnings);
             }
@@ -86,10 +92,10 @@ public static class Session
         {
             if (Directory.Exists(root)) Directory.Delete(root, true);
             // Resources mit .rpf (z. B. dlc.rpf) werden beim Export in lose Dateien umgewandelt – dort gibt es kein 1:1-Original.
-            if (Directory.EnumerateFiles(path, "*.rpf", SearchOption.AllDirectories).Any()) return;
+            if (Directory.EnumerateFiles(path, "*.rpf", SearchOption.AllDirectories).Any(IsGtaRpf)) return;
             foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
-                if (StreamExt.Contains(Path.GetExtension(f)) || f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase)) continue;
+                if (StreamExt.Contains(Path.GetExtension(f)) || (f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase) && IsGtaRpf(f))) continue;
                 var rel = Path.GetRelativePath(path, f);
                 if (rel.Split('\\', '/').Any(p => p.Equals(".git", StringComparison.OrdinalIgnoreCase) || p.Equals("node_modules", StringComparison.OrdinalIgnoreCase))) continue;
                 var target = Path.Combine(root, rel);
@@ -150,6 +156,21 @@ public static class Session
         }
         return name;
     }
+
+    /// <summary>Echtes GTA-V-Archiv (Kopf „RPF7“)? FiveM legt z. B. leere „resource.rpf“ im alten RPF2-Format an.</summary>
+    public static bool IsGtaRpf(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            var b = new byte[4];
+            return fs.Read(b, 0, 4) == 4 && b[0] == (byte)'7' && b[1] == (byte)'F' && b[2] == (byte)'P' && b[3] == (byte)'R';
+        }
+        catch { return false; }
+    }
+
+    static string ForeignRpfText(string path) =>
+        $"{Path.GetFileName(path)} ist kein GTA-V-Archiv (alte FiveM-Datei) und wurde übersprungen – sie bleibt beim Export unverändert erhalten.";
 
     static int OpenRpf(string path, string sessionDir, string src, List<IndexEntry> index, List<string> warnings)
     {
@@ -313,7 +334,7 @@ public static class Session
         catch { return new List<IndexEntry>(); }
     }
 
-    static void SaveIndex(string sessionDir, List<IndexEntry> index)
+    public static void SaveIndex(string sessionDir, List<IndexEntry> index)
     {
         File.WriteAllText(Path.Combine(sessionDir, "index.json"), JsonSerializer.Serialize(index, Program.JsonOpts));
     }

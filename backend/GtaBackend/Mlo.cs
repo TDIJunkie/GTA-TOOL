@@ -289,7 +289,10 @@ public static class Mlo
         var pts = new List<Vector3>();
         var tris = new List<int>();
         Matrix toLocal = Matrix.Identity;
-        if (mloPos != null && mloRot != null)
+        // Manche Interior-Kollisionen liegen schon relativ zum Interior (nahe 0/0/0) statt in Weltkoordinaten
+        var bc = rootBounds != null ? (rootBounds.BoxMin + rootBounds.BoxMax) * 0.5f : Vector3.Zero;
+        bool alreadyLocal = mloPos != null && bc.Length() < (bc - new Vector3(mloPos[0], mloPos[1], mloPos[2])).Length();
+        if (mloPos != null && mloRot != null && !alreadyLocal)
         {
             var world = Matrix.RotationQuaternion(new Quaternion(mloRot[0], mloRot[1], mloRot[2], mloRot[3])) * Matrix.Translation(mloPos[0], mloPos[1], mloPos[2]);
             toLocal = Matrix.Invert(world);

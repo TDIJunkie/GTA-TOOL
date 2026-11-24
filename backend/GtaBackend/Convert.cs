@@ -27,7 +27,7 @@ public static class VehicleConvert
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
-    static void SetLabel(string sessionDir, string key, string text)
+    public static void SetLabel(string sessionDir, string key, string text)
     {
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(text)) return;
         var l = LoadLabels(sessionDir);

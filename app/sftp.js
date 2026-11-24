@@ -106,7 +106,7 @@ async function connect(id, draft) {
   const client = new Client(`gta-tool-${s.id || 'test'}`);
   let seenKey = null;
   const opts = {
-    host: s.host, port: s.port, username: s.username, readyTimeout: 15000, keepaliveInterval: 15000,
+    host: s.host, port: s.port, username: s.username, readyTimeout: 15000, keepaliveInterval: 15000, retries: 0,
     hostHash: 'sha256',
     hostVerifier: (hash) => {
       seenKey = String(hash);
@@ -121,7 +121,10 @@ async function connect(id, draft) {
     opts.password = secret;
     opts.tryKeyboard = true;
   }
-  const ready = client.connect(opts).catch((e) => {
+  // Eigene Zeitgrenze: ssh2-sftp-client meldet manche Zeitüberschreitungen nicht über das Promise (sonst hängt die Oberfläche)
+  let guard;
+  const timeout = new Promise((_, rej) => { guard = setTimeout(() => { client.end().catch(() => {}); rej(new Error('Timed out while waiting for handshake')); }, 45000); });
+  const ready = Promise.race([client.connect(opts), timeout]).finally(() => clearTimeout(guard)).catch((e) => {
     if (s.hostKey && seenKey && s.hostKey !== seenKey) {
       throw new Error(`Achtung: Der Sicherheitsschlüssel von ${s.host} hat sich geändert. Falls der Server neu aufgesetzt wurde, den Server in der Verwaltung löschen und neu anlegen – sonst NICHT verbinden.`);
     }

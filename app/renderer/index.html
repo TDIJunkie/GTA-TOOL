@@ -30,10 +30,10 @@
           <span class="tile-title">Kleidung</span>
           <span class="tile-text">Addon- und Replace-Kleidung, Texturen, männlich ⇄ weiblich</span>
         </button>
-        <button class="tile soon" disabled>
+        <button class="tile" data-goto="weapon">
           <span class="tile-icon">🔫</span>
           <span class="tile-title">Waffen</span>
-          <span class="tile-text">Bald verfügbar</span>
+          <span class="tile-text">Addon- und Replace-Waffen, Texturen, Blender, Anzeigenamen
         </button>
         <button class="tile" data-goto="mlo">
           <span class="tile-icon">🏠</span>
@@ -269,6 +269,48 @@
     </footer>
   </section>
 
+  <!-- ============ WEAPON STUDIO ============ -->
+  <section id="view-weapon" class="view hidden">
+    <header class="topbar">
+      <button class="btn ghost" data-goto="start">← Startseite</button>
+      <div class="brand">Weapon Studio</div>
+      <div class="spacer"></div>
+      <span id="keys-badge-7" class="badge">GTA-Schlüssel …</span>
+      <button class="btn ghost" data-action="settings">⚙ Einstellungen</button>
+    </header>
+    <main id="ws-empty" class="vs-empty">
+      <div class="dropzone" id="wdropzone">
+        <div class="drop-icon">🔫</div>
+        <h2>Waffen öffnen</h2>
+        <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Waffen-Resource oder ein Addon mit dlc.rpf) oder einzelne <b>Dateien</b> hierher.<br>
+          Erkannt werden Modelle (.ydr), Texturen (.ytd), Waffen-Metas (weapons.meta, weaponarchetypes.meta …) und Archive (.rpf).</p>
+        <div class="row center gap wrap">
+          <button class="btn primary big" data-wopen="folder">📁 Ordner importieren</button>
+          <button class="btn big" data-wopen="weaponfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-sftp-open="weapon">🌐 Vom Server (SFTP)</button>
+          <button class="btn big" id="ws-gta">🔫 Original-GTA-Waffe laden</button>
+        </div>
+      </div>
+    </main>
+    <main id="ws-main" class="vs-main hidden">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <div class="row gap-s">
+            <button class="btn small" id="ws-add">+ Hinzufügen</button>
+            <button class="btn small ghost" id="ws-close">Schließen</button>
+          </div>
+        </div>
+        <div class="tree" id="ws-tree"></div>
+      </aside>
+      <section class="content" id="ws-content"></section>
+    </main>
+    <footer class="statusbar">
+      <span id="ws-status-text" class="muted">Bereit.</span>
+      <div class="spacer"></div>
+      <button class="btn primary" id="ws-export" disabled>📦 Als FiveM-Resource exportieren</button>
+    </footer>
+  </section>
+
   <!-- Overlays -->
   <div id="modal-root"></div>
   <div id="toasts"></div>
@@ -286,6 +328,7 @@
   <script src="mlo.js"></script>
   <script src="anim.js"></script>
   <script src="props.js"></script>
+  <script src="weapons.js"></script>
   <script src="sftp.js"></script>
   <script src="placement.js"></script>
   <script src="app.js"></script>

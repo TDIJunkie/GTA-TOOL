@@ -29,7 +29,7 @@ public static class Props
     static Catalog catalog;
     static readonly Dictionary<string, RpfFile> Open = new(StringComparer.OrdinalIgnoreCase);
 
-    static RpfFile Archive(string path)
+    internal static RpfFile Archive(string path)
     {
         if (Open.TryGetValue(path, out var r)) return r;
         r = new RpfFile(path, Path.GetFileName(path));
@@ -38,7 +38,7 @@ public static class Props
         return r;
     }
 
-    static IEnumerable<(RpfFile owner, RpfFileEntry fe)> Walk(RpfFile f)
+    internal static IEnumerable<(RpfFile owner, RpfFileEntry fe)> Walk(RpfFile f)
     {
         foreach (var e in f.AllEntries ?? new List<RpfEntry>()) if (e is RpfFileEntry fe) yield return (f, fe);
         foreach (var c in f.Children ?? new List<RpfFile>()) foreach (var x in Walk(c)) yield return x;
@@ -86,14 +86,7 @@ public static class Props
         if (string.IsNullOrEmpty(gtaPath) || !File.Exists(Path.Combine(gtaPath, "GTA5.exe")))
             throw new UserError("Bitte in den Einstellungen den GTA-V-Ordner (mit GTA5.exe) angeben.");
         if (!Keys.Loaded) throw new UserError("Die GTA-Schlüssel sind nicht geladen.");
-        var archives = Directory.GetFiles(gtaPath, "x64*.rpf").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
-        var dlc = Path.Combine(gtaPath, "update", "x64", "dlcpacks");
-        if (Directory.Exists(dlc)) archives.AddRange(Directory.GetDirectories(dlc).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Select(d => Path.Combine(d, "dlc.rpf")).Where(File.Exists));
-        foreach (var u in new[] { "update.rpf", "update2.rpf" })
-        {
-            var p = Path.Combine(gtaPath, "update", u);
-            if (File.Exists(p)) archives.Add(p);
-        }
+        var archives = GameArchives(gtaPath);
 
         var c = new Catalog();
         var ytyps = new List<(RpfFile owner, RpfFileEntry fe)>();
@@ -151,6 +144,38 @@ public static class Props
         File.WriteAllText(cacheFile, JsonSerializer.Serialize(c, Program.JsonOpts));
         Program.Progress("Fertig.", 100);
         return new { archetypes = c.Archetypes.Count, files = c.Files.Count };
+    }
+
+    /// <summary>Alle Archive der Installation in Lade-Reihenfolge (spätere überschreiben frühere).</summary>
+    internal static List<string> GameArchives(string gtaPath)
+    {
+        var archives = Directory.GetFiles(gtaPath, "x64*.rpf").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        var dlc = Path.Combine(gtaPath, "update", "x64", "dlcpacks");
+        if (Directory.Exists(dlc)) archives.AddRange(Directory.GetDirectories(dlc).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Select(d => Path.Combine(d, "dlc.rpf")).Where(File.Exists));
+        foreach (var u in new[] { "update.rpf", "update2.rpf" })
+        {
+            var p = Path.Combine(gtaPath, "update", u);
+            if (File.Exists(p)) archives.Add(p);
+        }
+        return archives;
+    }
+
+    /// <summary>Eine Datei (z. B. „w_pi_pistol.ydr“) aus der Installation in cacheDir holen. null = nicht vorhanden.</summary>
+    public static string ExtractFile(string gtaPath, string cacheFile, string fileName, string cacheDir)
+    {
+        var c = Load(cacheFile);
+        if (c == null || !c.Files.TryGetValue(fileName.ToLowerInvariant(), out var fr)) return null;
+        Directory.CreateDirectory(cacheDir);
+        var target = Path.Combine(cacheDir, fileName.ToLowerInvariant());
+        if (File.Exists(target)) return target;
+        var rpf = Archive(Path.Combine(gtaPath, fr.A));
+        var hit = Walk(rpf).FirstOrDefault(x => x.fe.Path.Replace('\\', '/').Equals(fr.P, StringComparison.OrdinalIgnoreCase));
+        if (hit.fe == null) return null;
+        var data = hit.owner.ExtractFile(hit.fe);
+        if (data == null) return null;
+        if (hit.fe is RpfResourceFileEntry rr) data = ResourceBuilder.AddResourceHeader(rr, ResourceBuilder.Compress(data));
+        File.WriteAllBytes(target, data);
+        return target;
     }
 
     public static object Search(string cacheFile, string term, int max)

@@ -165,6 +165,98 @@ def clothing_root():
     return roots
 
 
+MIN_BOX = 0.02
+
+
+def fix_flat_boxes():
+    """Sollumz speichert eine Kollisions-Box nur über 4 Eckpunkte. Ist sie in einer Richtung 0 dick
+    (eine reine Fläche), lässt sie sich nicht mehr eindeutig zurücklesen – beim nächsten Laden (und in GTA)
+    wird daraus wieder ein Klotz. Solche Flächen bekommen vor dem Export eine Mindestdicke von 2 cm
+    (liegt die Fläche waagerecht, nach unten, damit die Oberkante bleibt)."""
+    import bmesh
+    from mathutils import Matrix, Vector
+    fixed = 0
+    for o in list(bpy.data.objects):
+        if o.type != "MESH" or stype(o) != "sollumz_bound_poly_box":
+            continue
+        mw = o.matrix_world.copy()
+        c = [mw @ Vector(v) for v in o.bound_box]
+        p0 = c[0]
+        edges = [c[4] - p0, c[3] - p0, c[1] - p0]
+        thin = [i for i, e in enumerate(edges) if e.length < MIN_BOX]
+        if not thin or len(thin) == 3:
+            continue
+        good = [edges[i] for i in range(3) if i not in thin]
+        if len(thin) == 2:
+            up = Vector((0, 0, 1)) if abs(good[0].normalized().z) < 0.9 else Vector((1, 0, 0))
+            good.append(good[0].cross(up))
+        for i in thin:
+            n = good[0].cross(good[1]).normalized() if i == thin[-1] else good[1].normalized()
+            if edges[i].length > 1e-9 and n.dot(edges[i]) < 0:
+                n = -n
+            if abs(n.z) > 0.7:
+                if n.z > 0:
+                    n = -n
+            else:
+                p0 = p0 - n * (MIN_BOX / 2)
+            edges[i] = n * MIN_BOX
+        if o.data.users > 1:
+            o.data = o.data.copy()
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0)
+        for v in bm.verts:
+            v.co += Vector((0.5, 0.5, 0.5))
+        bm.to_mesh(o.data)
+        bm.free()
+        o.data.update()
+        m = Matrix.Identity(4)
+        for r in range(3):
+            m[r][0], m[r][1], m[r][2], m[r][3] = edges[0][r], edges[1][r], edges[2][r], p0[r]
+        o.matrix_world = m
+        fixed += 1
+    if fixed:
+        bpy.context.view_layer.update()
+        print(f"[GTA Tool] {fixed} flache Kollisions-Box(en) auf {int(MIN_BOX * 100)} cm Dicke gebracht.")
+    return fixed
+
+
+def _is_plain_box(o):
+    """True, wenn das Mesh noch ein einfacher Quader ist (8 Ecken = genau die 8 Ecken seines Hüllquaders)."""
+    from mathutils import Vector
+    me = o.data
+    if len(me.vertices) != 8:
+        return False
+    corners = [Vector(c) for c in o.bound_box]
+    size = max((corners[6] - corners[0]).length, 1e-6)
+    tol = max(0.002, size * 1e-4)
+    hit = set()
+    for v in me.vertices:
+        i = min(range(8), key=lambda k: (corners[k] - v.co).length)
+        if (corners[i] - v.co).length > tol:
+            return False
+        hit.add(i)
+    # bei Dicke 0 fallen Ecken zusammen – das bleibt eine (flache) Box, fix_flat_boxes kümmert sich
+    return len(hit) == 8 or min((corners[4] - corners[0]).length, (corners[3] - corners[0]).length,
+                                (corners[1] - corners[0]).length) < MIN_BOX
+
+
+def convert_shaped_boxes():
+    """Eine „Bound Poly Box“ ist in GTA immer ein Quader (gespeichert über 4 Ecken). Wurde sie im Edit-Mode
+    umgeformt (z. B. zu einem L extrudiert), würde Sollumz nur den Hüllquader speichern – die Form wäre weg.
+    Solche Boxen werden vor dem Export zu Dreiecks-Kollision („Bound Poly Triangle“), die jede Form hält."""
+    n = 0
+    for o in list(bpy.data.objects):
+        if o.type != "MESH" or stype(o) != "sollumz_bound_poly_box":
+            continue
+        if _is_plain_box(o):
+            continue
+        o.sollum_type = "sollumz_bound_poly_triangle"
+        n += 1
+    if n:
+        print(f"[GTA Tool] {n} umgeformte Kollisions-Box(en) als Dreiecks-Kollision gespeichert.")
+    return n
+
+
 def do_export_ydd():
     roots = clothing_root()
     if not roots:
@@ -173,6 +265,8 @@ def do_export_ydd():
     root.name = MODEL
     if bpy.context.object and bpy.context.object.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
+    convert_shaped_boxes()
+    fix_flat_boxes()
     for o in bpy.data.objects:
         if o.type == "ARMATURE":
             o.data.pose_position = "REST"
@@ -726,6 +820,139 @@ def new_mlo_setup():
     scene.unit_settings.system = "METRIC"
 
 
+COLL_ENV = "GTA-Umgebung (nur Referenz)"
+
+
+def _file_is_local(place):
+    """Kollisionen von Interiors liegen mal in Weltkoordinaten, mal relativ zum Interior.
+    Entscheidung: Liegt die geladene Datei näher am Ursprung als an der Interior-Position → relativ."""
+    from mathutils import Vector
+    inst = place.get("inst")
+    if not inst:
+        return False
+    pts = [o.matrix_world @ Vector(c) for o in bpy.data.objects if o.type == "MESH" for c in o.bound_box]
+    if not pts:
+        return False
+    center = sum(pts, Vector()) / len(pts)
+    return center.length < (center - Vector(inst["pos"])).length
+
+
+COLL_REF = "Interior (nur Referenz)"
+COLL_REF_COL = "Interior-Kollision (nur Referenz)"
+
+
+def _instance_glbs(models, coll, base, prefix, wire=False):
+    """GLB je Modell einmal importieren, dann je Platzierung ein Objekt (gemeinsame Mesh-Daten) in coll anlegen."""
+    from mathutils import Matrix, Quaternion
+    count = 0
+    for m in models:
+        glb = m.get("glb")
+        if not glb or not Path(glb).exists():
+            continue
+        before = set(bpy.data.objects)
+        try:
+            res = bpy.ops.import_scene.gltf(filepath=str(glb))
+        except Exception as exc:  # noqa: BLE001
+            print("GLB-Import fehlgeschlagen:", glb, exc)
+            continue
+        new = [o for o in bpy.data.objects if o not in before]
+        if "FINISHED" not in res or not new:
+            for o in new:
+                bpy.data.objects.remove(o, do_unlink=True)
+            continue
+        bpy.context.view_layer.update()
+        meshes = []
+        for o in new:
+            if o.type == "MESH":
+                me = o.data.copy()
+                me.transform(o.matrix_world)
+                me.name = f"ref_{m['name']}"
+                meshes.append(me)
+        for o in new:
+            bpy.data.objects.remove(o, do_unlink=True)
+        for e in m.get("entities", []):
+            p, q = e["position"], e["rotation"]
+            s = e.get("scale") or [1, 1]
+            mw = (Matrix.Translation(p) @ Quaternion((q[3], q[0], q[1], q[2])).to_matrix().to_4x4()
+                  @ Matrix.Diagonal((s[0] or 1, s[0] or 1, s[1] or 1, 1)))
+            for me in meshes:
+                o = bpy.data.objects.new(f"{prefix}: {m['name']}", me)
+                coll.objects.link(o)
+                o.matrix_world = base @ mw
+                o.hide_render = True
+                if wire:
+                    o.display_type = "WIRE"
+                    o.show_in_front = True
+                count += 1
+    scene = bpy.context.scene
+    for o in list(scene.collection.objects):   # Importer-Reste (leere Objekte) entfernen
+        if o.type == "EMPTY" and not o.children:
+            bpy.data.objects.remove(o, do_unlink=True)
+    return count
+
+
+def mlo_load_surroundings(path):
+    """Umliegende GTA-Gebäude als Referenz laden (werden NICHT exportiert).
+    Blender-Ursprung = Interior-Position, gedreht um die Interior-Drehung → Weltkoordinaten umrechnen."""
+    from mathutils import Matrix, Quaternion
+    import math
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print("Umgebung nicht lesbar:", exc)
+        return
+    old = bpy.data.collections.get(COLL_ENV)
+    if old is not None:
+        same = (list(old.get("gta_pos", [])) == [round(v, 2) for v in MLO_POS]
+                and round(float(old.get("gta_heading", -999)), 1) == round(MLO_HEADING, 1))
+        if same:
+            return
+        for o in list(old.all_objects):   # Interior wurde verschoben → Umgebung neu laden
+            bpy.data.objects.remove(o, do_unlink=True)
+        bpy.data.collections.remove(old)
+    env = _coll(COLL_ENV, "COLOR_07")
+    env["gta_pos"] = [round(v, 2) for v in MLO_POS]
+    env["gta_heading"] = round(MLO_HEADING, 1)
+    env.hide_select = True
+    def tr(p, q, s=None):
+        m = Matrix.Translation(p) @ Quaternion((q[3], q[0], q[1], q[2])).to_matrix().to_4x4()
+        if s:
+            m = m @ Matrix.Diagonal((s[0] or 1, s[0] or 1, s[1] or 1, 1))
+        return m
+    place = data.get("place")
+    if not place:   # neues Interior: Ursprung = Interior-Position, gedreht
+        inv = (Matrix.Translation(MLO_POS) @ Matrix.Rotation(math.radians(MLO_HEADING), 4, "Z")).inverted()
+    elif place.get("world") and not _file_is_local(place):   # Datei liegt in Weltkoordinaten (z. B. Kollision)
+        inv = Matrix.Identity(4)
+    else:   # Modell eines Interiors: Welt = Interior-Platzierung · Objekt-Platzierung im Interior
+        world = tr(place["inst"]["pos"], place["inst"]["rot"])
+        if place.get("ent"):
+            e = place["ent"]
+            world = world @ tr(e["position"], e["rotation"], e.get("scale"))
+        inv = world.inverted()
+    count = _instance_glbs(data.get("models", []), env, inv, "GTA")
+    print(f"Umgebung: {count} Objekte geladen")
+    if count == 0:
+        bpy.data.collections.remove(env)
+    # Rest des Interiors (Koordinaten relativ zum Interior) → Datei-Koordinaten: inv · Interior-Platzierung
+    refs = data.get("mlo") or []
+    if refs and place and place.get("inst"):
+        base = inv @ tr(place["inst"]["pos"], place["inst"]["rot"])
+        for kind, cname, color, prefix in (("model", COLL_REF, "COLOR_06", "Interior"), ("collision", COLL_REF_COL, "COLOR_01", "Kollision")):
+            items = [r for r in refs if r.get("kind") == kind]
+            if not items:
+                continue
+            old = bpy.data.collections.get(cname)
+            if old is not None:
+                for o in list(old.all_objects):
+                    bpy.data.objects.remove(o, do_unlink=True)
+                bpy.data.collections.remove(old)
+            c = _coll(cname, color)
+            c.hide_select = True
+            n = _instance_glbs(items, c, base, prefix, wire=(kind == "collision"))
+            print(f"Referenz {prefix}: {n} Objekte geladen")
+
+
 def _bbox_world(o):
     from mathutils import Vector
     pts = [o.matrix_world @ Vector(c) for c in o.bound_box]
@@ -1031,6 +1258,20 @@ class GTATOOL_PT_panel(bpy.types.Panel):
                 col.label(text=f"Clip: {CLIP}")
         else:
             col.label(text=f"Modell: {MODEL}", icon="AUTO")
+        shown = False
+        for cname, label, icon in ((COLL_ENV, "Umliegende GTA-Gebäude", "WORLD"), (COLL_REF, "Restliches Interior", "HOME"),
+                                   (COLL_REF_COL, "Andere Kollisionen", "MOD_PHYSICS")):
+            c = bpy.data.collections.get(cname)
+            if c is None:
+                continue
+            col.separator()
+            col.label(text=f"{label}:", icon=icon)
+            row = col.row(align=True)
+            row.prop(c, "hide_viewport", text="Ausblenden", toggle=True)
+            row.prop(c, "hide_select", text="Gesperrt", toggle=True)
+            shown = True
+        if shown:
+            col.label(text="(nur Vorlage, wird nicht exportiert)")
         col.separator()
         row = col.row()
         row.scale_y = 2.0
@@ -1047,7 +1288,8 @@ class GTATOOL_PT_panel(bpy.types.Panel):
         if IS_MLO:
             for line in ("So geht's:", "• „Gebäude“: Wände, Boden, Decke,", "  Einrichtung – wird zur Hülle.", "• „Räume“: Drahtboxen = Räume", "  (mit S auf Raumgröße ziehen).",
                          "• „Portale“: Rahmen in jede", "  Öffnung zwischen Räumen/nach außen.", "• „Türen“: GTA-Türen (Platzhalter).",
-                         "• 0/0/0 = Kartenposition (Boden).", "• 1 Einheit = 1 Meter.", "• Beliebig oft zurückschicken."):
+                         "• 0/0/0 = Kartenposition (Boden).", "• 1 Einheit = 1 Meter.",
+                         "• „GTA-Umgebung“ = nur Vorlage,", "  wird nicht exportiert.", "• Beliebig oft zurückschicken."):
                 col.label(text=line)
         elif IS_NEW:
             for line in ("So geht's:", "• Modelliere ganz normal – alle", "  sichtbaren Objekte werden", "  zusammen zum Prop.",
@@ -1118,6 +1360,12 @@ def main():
         if bpy.data.collections.get(COLL_SHELL) is None:   # sonst: gespeicherte .blend wurde geöffnet
             clear_scene()
             new_mlo_setup()
+        if ARGS.get("surroundings"):
+            write_status("starting", note="Umliegende Gebäude werden geladen …")
+            try:
+                mlo_load_surroundings(ARGS["surroundings"])
+            except Exception as exc:  # noqa: BLE001
+                print("Umgebung konnte nicht geladen werden:", exc)
         write_status("ready")
         if ARGS.get("auto-export"):
             if ARGS.get("test-model"):
@@ -1156,6 +1404,11 @@ def main():
     sollumz_import(YFT)
     if IS_YDD:
         import_body_reference()
+    if ARGS.get("surroundings"):
+        try:
+            mlo_load_surroundings(ARGS["surroundings"])
+        except Exception as exc:  # noqa: BLE001
+            print("Umgebung konnte nicht geladen werden:", exc)
     write_status("ready")
     if ARGS.get("auto-export"):
         do_export()

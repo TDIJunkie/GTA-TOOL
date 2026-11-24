@@ -318,6 +318,12 @@ Backend `PropPack.cs`, Oberfläche `props.js`.
       aus (geprüft: Chiliad 800 m, Flughafen 16 m, Vinewood-Schild 349 m). Vorschlag = Min-Höhe der Zelle (Max = Dächer).
 - [x] **Dialog „✨ Neues Interior“** (MLO Studio: Startfläche, Übersicht, Hinzufügen): Name, Karte, X/Y/Z, Drehung, Größe,
       Koordinaten einfügen (`vector3(...)`).
+- [x] **Umliegende GTA-Gebäude in Blender** (Häkchen im Dialog, Standard an; auch bei „In Blender weiterbearbeiten“):
+      main.js `surroundingsFile` → `world.area` (Radius max(40, Diagonale/2+30), max. 600 Objekte) + GLB je Modell
+      (Cache `gta-objekte-glb`) → `umgebung.json` → Bridge `--surroundings`: Sammlung „GTA-Umgebung (nur Referenz)“,
+      Meshes je Modell einmal (verlinkte Daten), Platzierung = inverse(Interior-Position·Drehung) · Entity-Matrix,
+      nicht anklickbar/nicht gerendert, **nicht exportiert**. Panel: Ausblenden / anklickbar. Wird in der .blend gespeichert
+      und nur neu geladen, wenn sich Position/Drehung geändert haben. Test: Vanilla Unicorn, 600 Objekte, .blend ≈ 60 MB.
 - [x] **Blender-Modus** `--new-mlo <name> --pos x,y,z --heading h --size w,d,h --doors tueren.json --blend-save …`:
       Vorlage (Boden, 4 Wände mit Türöffnung, Decke) in Sammlungen „Gebäude“, „Räume“ (Draht-Boxen), „Portale“ (Rahmen),
       „Türen“ (Platzhalter in Originalgröße, Drehpunkt = Scharnier, Unterkante auf Boden; Liste aus dem Objektkatalog `mlo.doorList`).
@@ -367,3 +373,60 @@ App mit `--remote-debugging-port=9333` starten und per DevTools-Protokoll steuer
 Vordergrund holen** (der Nutzer spielt evtl. gerade).
 Im versteckten Fenster (`GTA_TOOL_HIDDEN=1`) zeichnet requestAnimationFrame kaum neu → vor jedem CDP-Screenshot
 `Viewer3D.renderNow()` aufrufen, sonst zeigt das Bild einen veralteten Stand. Nach Tests `settings.json` (lastImportDir) zurücksetzen.
+
+### Stand 21.11.2026 – Fremde .rpf in Resources
+- [x] FiveM legt teils leere `resource.rpf` im alten **RPF2**-Format an (Kopf „RPF2“, nur Nullen). CodeWalker bricht damit ab
+      („Invalid Resource - not GTAV!“). `Session.IsGtaRpf` prüft den Kopf („RPF7“); fremde .rpf werden beim Öffnen mit Hinweis
+      übersprungen, zählen nicht als Archiv für `SaveOriginal` und bleiben beim Export unverändert erhalten.
+- [x] **Umgebung auch beim Bearbeiten bestehender Interiors** (Modell oder Kollision → „In Blender bearbeiten“):
+      Renderer `surroundingsFor` sucht das Interior mit YMAP-Platzierung und die Entity des Modells → `place`
+      ({inst, ent} = Welt-Matrix des Modells; Kollision: {world, inst}). Bridge rechnet die Umgebung mit inverse(Welt)
+      in die Datei-Koordinaten. Interior-Kollisionen liegen teils relativ zum Interior statt in Weltkoordinaten →
+      automatische Erkennung (Bridge `_file_is_local`, Backend `CollisionGlb`: näher an 0/0/0 als an der Interior-Position).
+      Getestet mit Paleto Sheriff: Modell und Kollision treffen dieselbe GTA-Oberfläche.
+- [x] **Restliches Interior als Referenz** beim Bearbeiten von Modell/Kollision: alle übrigen Entities (eigene Modelle per
+      `model.glb`, GTA-Objekte per `archGlbFile`) und alle anderen .ybn (`mlo.collisionGlb` → Interior-Koordinaten) →
+      `umgebung.json` Feld `mlo`. Bridge: `_instance_glbs` (gemeinsam mit GTA-Umgebung), Sammlungen „Interior (nur Referenz)“
+      und „Interior-Kollision (nur Referenz)“ (Drahtgitter), Basis = inverse(Datei-Welt) · Interior-Platzierung.
+      Ohne YMAP-Platzierung: nur Interior-Referenz, keine GTA-Gebäude. Panel: je Sammlung Ausblenden/Gesperrt.
+      Test Paleto Sheriff: 367 Modelle, Kollision und Interior-Dach deckungsgleich (3,61 m).
+- [x] **Flache Kollisions-Boxen bleiben flach**: Sollumz speichert eine Poly-Box nur über 4 Ecken; bei Dicke 0 (Fläche)
+      kam sie beim Neuladen als Klotz zurück. Bridge `fix_flat_boxes()` (vor dem Export in `do_export_ydd`) gibt Boxen
+      unter 2 cm eine Mindestdicke von 2 cm, waagerechte Flächen nach unten (Oberkante bleibt). Hinweis: Box-Nummern
+      („Bound Poly Box.203“) ändern sich nach jedem Export, weil Sollumz die Teile neu sortiert.
+- [x] **Auswahl beim Öffnen in Blender** (Modell/Kollision im MLO Studio): Dialog mit Haken für „Umliegende GTA-Gebäude“,
+      „Restliche Modelle des Interiors“, „Restliche Kollisionen des Interiors“ + Knopf „Nur diese Datei“. Auswahl wird in
+      localStorage (`gtatool.mloBlenderOptions`) gemerkt. Renderer filtert `surroundings` (center/mlo.models/gta/collisions);
+      nichts gewählt → ohne `--surroundings`.
+- [x] **Umgeformte Poly-Boxen bleiben in Form**: Eine im Edit-Mode umgeformte „Bound Poly Box“ (z. B. L-Form) speicherte
+      Sollumz nur als Hüllquader. Bridge `convert_shaped_boxes()` (vor `fix_flat_boxes`) stellt Boxen, deren Mesh kein
+      einfacher 8-Ecken-Quader mehr ist, auf `sollumz_bound_poly_triangle` um. Beim Neuladen landen diese Dreiecke im
+      gemeinsamen Objekt „Bound Poly Mesh“. Test: L-Form aus Box.203 → Export → Neuladen: Platte + Wand erhalten.
+
+### Stand 24.11.2026 – Weapon Studio
+
+Start: Kachel „Waffen“ oder `GTA Tool.exe --weapon-studio` (`Weapon Studio.lnk`). Sitzung `sessions.weapon`.
+Backend `Weapons.cs`, Oberfläche `weapons.js`.
+
+- [x] **Import**: Ordner/Dateien/Drag & Drop/RPF (Addon mit dlc.rpf)/SFTP. Erkennung über den Wurzel-Knoten der Metas:
+      CWeaponInfoBlob (weapons), CWeaponComponentInfoBlob, CWeaponModelInfo__InitDataList (Archetypen: Modell ↔ txdName),
+      CWeaponAnimationsSets, CPedModelInfo__PersonalityDataList. Texturen: txdName, txdName+hi, Modellname(+hi).
+      Ohne weapons.meta: w_*-Modelle = Replace der GTA-Waffe. Nicht-w_-Modelle unter „Sonstige Modelle“.
+- [x] **Ansicht Waffe**: Anzeigename (GXT2, AddTextEntry aus Original-Lua, eigene in labels.json), Art, Schaden, Magazin,
+      Reichweite, Schüsse/min, 3D normal/Hochdetail (_hi), Aufsätze (weaponcomponents + AttachPoints), Geschoss-Modell, Lua-Code.
+- [x] **Bearbeiten**: Anzeigename (legt bei Bedarf HumanNameHash an), Blender für Normal- und _hi-Modell (`mlo:blender`,
+      studio 'weapon'), „Auch als Hochdetail-Modell“ (kopiert normal → _hi), Modell ersetzen, Texturen wie in den anderen Studios.
+- [x] **Export**: stream, Waffen-Metas unter data/, data_file-Reihenfolge COMPONENTS → METADATA → ANIMATIONS → PED_PERSONALITY →
+      WEAPONINFO, client/names.lua (AddTextEntry), optional client/test.lua `/waffe WEAPON_NAME`, LIESMICH; SFTP-Ziel, Original erhalten.
+- Getestet mit `mpchristmas2/dlc.rpf` (Zielsuch-Raketenwerfer, Annäherungsmine, Schneeball): Erkennung, Anzeigename,
+  Export, erneutes Öffnen + Export byte-identisch, Blender-Rundweg headless (Skalierung übernommen, 10 Waffen-Knochen erhalten),
+  Oberfläche über CDP (Blender-Start mit Dummy). **Im Spiel noch ungetestet.** Waffenwerte (Schaden usw.) nur Anzeige.
+- [x] **Original-GTA-Waffen laden** (Wunsch Nutzer 24.11.2026): Dialog „🔫 Original-GTA-Waffe laden“ (Startfläche, Hinzufügen,
+      Übersicht). Einmaliger Katalog `%APPDATA%\GTA Tool\gta-waffen.json` (`Weapons.BuildGta`): w_*.ydr aus dem Objekt-Katalog,
+      Modell → WEAPON_/COMPONENT_ aus allen *weapon*.meta der Installation, Anzeigenamen aus german/american .gxt2
+      (121 Waffen, 550 Einzelteile, ~8 s). Suche nach Name/WEAPON_/Modell, Einzelteile optional, 3D-Vorschau (`weapon:gtaPreview`).
+      Laden kopiert Modell, _hi, .ytd und +hi.ytd unter Originalnamen in die Sitzung (Replace).
+- [x] **Texturen normal ⇄ +hi abgleichen**: Die +hi.ytd enthält dieselben Texturen in doppelter Auflösung (in der Hand sichtbar).
+      Ersetzen/Löschen wirkt in beiden Dateien, wenn die Textur dort existiert; Hinzufügen in beiden; Bearbeiten im Bildprogramm
+      wird nach dem Speichern per `tex:copyTo` in die Partner-Datei übernommen.
+      Getestet (CDP): Katalog einlesen, Suche „Pistole“, Vorschau, Laden, Löschen von w_pi_pistol_s in beiden Dateien, copyTo.

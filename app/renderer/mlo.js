@@ -569,6 +569,102 @@ const MloStudio = (() => {
 
   // ---------------------------------------------------------------- Modell / Texturen / Kollision
 
+  /** Wo liegt diese Datei in der GTA-Welt? → für „umliegende Gebäude in Blender“. null = unbekannt. */
+  /** Wo liegt diese Datei in der GTA-Welt + Rest des Interiors als Referenz (Modelle, GTA-Objekte, Kollisionen). */
+  async function surroundingsFor(file, kind) {
+    const mlos = (S.model && S.model.mlos) || [];
+    const order = [curMlo(), ...mlos].filter((m, i, a) => m && a.indexOf(m) === i);
+    const tf = (e) => ({ position: e.position, rotation: e.rotation, scale: e.scale });
+    for (const m of order) {
+      const inst = m.instance ? { pos: m.instance.position, rot: m.instance.rotation } : { pos: [0, 0, 0], rot: [0, 0, 0, 1] };
+      const center = m.instance ? m.instance.position : null;
+      const scene = m.key === S.mloKey && S.scene ? S.scene : await call('mlo:scene', { key: m.key }, { quiet: true });
+      if (!scene) continue;
+      const byName = new Map(scene.archetypes.map((a) => [a.name, a]));
+      const ent = kind === 'model' ? scene.entities.find((x) => (byName.get(x.name) || {}).model === file) : null;
+      if (kind === 'model' && !ent) continue;
+      // übrige Objekte des Interiors (eigene Modelle aus dem Paket und eingesetzte GTA-Objekte)
+      const models = new Map(), gta = new Map();
+      for (const x of scene.entities) {
+        if (x === ent) continue;
+        const a = byName.get(x.name);
+        if (a && a.model) {
+          if (!models.has(a.model)) models.set(a.model, { file: a.model, ytds: a.ytds || [], entities: [] });
+          models.get(a.model).entities.push(tf(x));
+        } else if (x.source === 'gta') {
+          if (!gta.has(x.name)) gta.set(x.name, { name: x.name, entities: [] });
+          gta.get(x.name).entities.push(tf(x));
+        }
+      }
+      const collisions = (S.model.collisions || []).filter((c) => c !== file);
+      const place = kind === 'collision' ? { world: true, inst } : { inst, ent: tf(ent) };
+      return { center, place, mlo: { models: [...models.values()], gta: [...gta.values()], collisions } };
+    }
+    return null;
+  }
+
+  // Was beim Öffnen in Blender zusätzlich (nur als Vorlage) mitgeladen wird – wird pro Nutzer gemerkt.
+  const BL_OPTS_KEY = 'gtatool.mloBlenderOptions';
+  function loadBlenderOpts() {
+    try { const o = JSON.parse(localStorage.getItem(BL_OPTS_KEY) || 'null'); if (o) return { gta: o.gta !== false, models: o.models !== false, collisions: o.collisions !== false }; } catch {}
+    return { gta: true, models: true, collisions: true };
+  }
+  function saveBlenderOpts(o) { try { localStorage.setItem(BL_OPTS_KEY, JSON.stringify(o)); } catch {} }
+
+  /** Fragt, was mit in Blender soll. Ergebnis: { gta, models, collisions } oder null (abgebrochen). */
+  function askBlenderContent(file, kind) {
+    return new Promise((resolve) => {
+      const o = loadBlenderOpts();
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; if (v) saveBlenderOpts(v); resolve(v); } };
+      const cb = (val) => h('input', { type: 'checkbox', checked: val });
+      const gta = cb(o.gta), models = cb(o.models), cols = cb(o.collisions);
+      const opt = (box, title, text) => h('label.check', { style: { marginTop: '8px' } }, box, h('span', h('b', title), h('br'), h('span.muted.small', text)));
+      const pick = () => ({ gta: gta.checked, models: models.checked, collisions: cols.checked });
+      modal({
+        title: '🧊 In Blender öffnen',
+        body: h('div',
+          h('p', `Bearbeitet wird nur ${kind === 'collision' ? 'die Kollision' : 'das Modell'} „${base(file)}“. Was soll zur Orientierung mitgeladen werden?`),
+          opt(gta, 'Umliegende GTA-Gebäude', 'Die echte GTA-Welt rund um das Interior.'),
+          opt(models, 'Restliche Modelle des Interiors', 'Alle anderen Objekte und Möbel in diesem Interior.'),
+          opt(cols, 'Restliche Kollisionen des Interiors', 'Die anderen Kollisionsdateien, als Drahtgitter.'),
+          h('p.muted.small', { style: { marginTop: '10px' } }, 'Alles Mitgeladene ist nur Vorlage: Es wird nicht exportiert und kann in Blender rechts (Taste N) → „GTA Tool“ ausgeblendet werden. Deine Auswahl wird gemerkt.')),
+        buttons: [
+          { label: 'Abbrechen' },
+          { label: 'Nur diese Datei', onClick: () => finish({ gta: false, models: false, collisions: false }) },
+          { label: 'Öffnen', primary: true, onClick: () => finish(pick()) },
+        ],
+        onClose: () => finish(null),
+      });
+    });
+  }
+
+  async function openInBlender(file, ytds, kind) {
+    const want = await askBlenderContent(file, kind);
+    if (!want) return false;
+    let env = (want.gta || want.models || want.collisions) ? await surroundingsFor(file, kind) : null;
+    const noPos = (want.gta || want.models || want.collisions) && !env;
+    if (env) {
+      env = {
+        ...env,
+        center: want.gta ? env.center : null,
+        mlo: {
+          models: want.models ? env.mlo.models : [],
+          gta: want.models ? env.mlo.gta : [],
+          collisions: want.collisions ? env.mlo.collisions : [],
+        },
+      };
+      if (!env.center && !env.mlo.models.length && !env.mlo.gta.length && !env.mlo.collisions.length) env = null;
+    }
+    const r = await call('mlo:blender', { file, ytds, surroundings: env }, { busyText: env ? 'Umgebung und Interior werden vorbereitet …' : 'Blender wird vorbereitet …' });
+    if (!r) return false;
+    if (r.surroundings && r.surroundings.error) toast(`Umliegende Gebäude konnten nicht geladen werden: ${r.surroundings.error}`, 'warn', 9000);
+    else if (noPos) toast('Position in der GTA-Welt unbekannt – Blender öffnet nur diese Datei.', 'info', 7000);
+    else if (env && want.gta && !env.center) toast('Interior ist noch nicht in der Welt platziert – Blender lädt nur das restliche Interior als Referenz, ohne GTA-Gebäude.', 'info', 9000);
+    S.blender[file] = 'open';
+    return true;
+  }
+
   async function viewModel(file) {
     const info = S.model.models.find((x) => x.file === file) || { file, name: base(file) };
     const ytds = S.scene ? (S.scene.archetypes.find((a) => a.model === file) || { ytds: [] }).ytds : [];
@@ -580,8 +676,7 @@ const MloStudio = (() => {
     wrap.append(viewer);
     wrap.append(h('div.actions',
       action('🧊', 'In Blender bearbeiten', 'Bearbeiten und direkt zurück übernehmen', async () => {
-        const r = await call('mlo:blender', { file, ytds }, { busyText: 'Blender wird vorbereitet …' });
-        if (r) { S.blender[file] = 'open'; toast('Blender startet. Zum Übernehmen: Seitenleiste (N) → „GTA Tool“ → „Speichern & zurück“.', 'info', 9000); render(true); }
+        if (await openInBlender(file, ytds, 'model')) { toast('Blender startet. Zum Übernehmen: Seitenleiste (N) → „GTA Tool“ → „Speichern & zurück“.', 'info', 9000); render(true); }
       }, bState === 'open'),
       action('💾', 'Datei exportieren', `${base(file)} speichern`, async () => { const r = await call('file:export', { file }); if (r) toast(`Gespeichert: ${r.file}`); }),
       action('♻', 'Datei ersetzen', 'Durch eine andere Datei ersetzen', async () => {
@@ -659,8 +754,7 @@ const MloStudio = (() => {
       viewer,
       h('div.actions',
         action('🧊', 'In Blender bearbeiten', 'Kollision anpassen und zurück übernehmen', async () => {
-          const r = await call('mlo:blender', { file, ytds: [] }, { busyText: 'Blender wird vorbereitet …' });
-          if (r) { S.blender[file] = 'open'; toast('Blender startet mit der Kollision.', 'info', 7000); render(true); }
+          if (await openInBlender(file, [], 'collision')) { toast('Blender startet mit der Kollision.', 'info', 7000); render(true); }
         }, bState === 'open'),
         action('💾', 'Datei exportieren', base(file), async () => { const r = await call('file:export', { file }); if (r) toast(`Gespeichert: ${r.file}`); }),
         action('♻', 'Datei ersetzen', 'Andere .ybn verwenden', async () => {
@@ -703,6 +797,7 @@ const MloStudio = (() => {
     const headOut = h('span.mono', '0°');
     const headIn = h('input', { type: 'range', min: 0, max: 359, step: 1, value: 0, oninput: (e) => { st.heading = Number(e.target.value); headOut.textContent = `${st.heading}°`; marker(); } });
     const heightInfo = h('div.hint', 'Klicke auf die Karte, um die Position zu wählen.');
+    const envCb = h('input', { type: 'checkbox', checked: true });
     const paste = h('input', { type: 'text', placeholder: 'Koordinaten einfügen, z. B. vector3(-1336.5, -3044.2, 13.9) oder -1336.5, -3044.2, 13.9' });
     const mapEl = h('div.viewer', { style: { height: '430px' } }, h('div.viewer-status', 'Karte wird geladen …'),
       h('div.viewer-bar', h('span.viewer-hint', 'Klick: Position wählen · Ziehen: Karte verschieben · Mausrad: zoomen')));
@@ -741,6 +836,8 @@ const MloStudio = (() => {
           field('Drehung', headIn, headOut),
           field('Breite (m)', wIn), field('Tiefe (m)', dIn), field('Raumhöhe (m)', hIn)),
         heightInfo,
+        h('label.check', { style: { marginTop: '8px' } }, envCb,
+          h('span', 'Umliegende GTA-Gebäude in Blender mitladen (nur als Vorlage, um das Interior an das Original-Gebäude anzupassen – wird nicht exportiert)')),
         h('div.row.gap-s', { style: { marginTop: '8px' } },
           h('button.btn', {
             onclick: async () => {
@@ -771,8 +868,9 @@ const MloStudio = (() => {
             let reopen = false;
             const src = await call('mlo:blendSource', { name }, { quiet: true });
             if (src && src.exists) reopen = await UI.confirm('Gespeicherte Blender-Datei', `Für „${name}“ gibt es schon eine Blender-Datei von früher. Weiterbearbeiten? („Abbrechen“ = neu mit Vorlage beginnen)`, 'Weiterbearbeiten');
-            const r = await call('mlo:newInBlender', { name, pos: [st.x, st.y, st.z], heading: st.heading, size: [st.w, st.d, st.h], reopen }, { busyText: 'Blender wird gestartet …' });
+            const r = await call('mlo:newInBlender', { name, pos: [st.x, st.y, st.z], heading: st.heading, size: [st.w, st.d, st.h], reopen, surroundings: envCb.checked }, { busyText: envCb.checked ? 'Umliegende Gebäude werden vorbereitet …' : 'Blender wird gestartet …' });
             if (!r) return true;
+            if (r.surroundings && r.surroundings.error) toast(`Umliegende Gebäude konnten nicht geladen werden: ${r.surroundings.error}`, 'warn', 9000);
             S.blender[r.key] = 'open';
             toast(`Blender startet mit „${name}“. Rechts (Taste N) → „GTA Tool“: Räume, Portale, Türen und „Speichern & zurück“.`, 'info', 12000);
             if (S.model) render(true);
@@ -796,7 +894,7 @@ const MloStudio = (() => {
   async function reopenInBlender(m) {
     const pos = m.instance ? m.instance.position : [0, 0, 0];
     const heading = Math.round(headingOf(m.instance && m.instance.rotation) * 10) / 10;
-    const r = await call('mlo:newInBlender', { name: m.name, pos, heading, size: [10, 8, 3.5], reopen: true }, { busyText: 'Blender wird gestartet …' });
+    const r = await call('mlo:newInBlender', { name: m.name, pos, heading, size: [10, 8, 3.5], reopen: true, surroundings: true }, { busyText: 'Umliegende Gebäude werden vorbereitet …' });
     if (!r) return;
     S.blender[r.key] = 'open';
     toast('Blender startet mit deiner gespeicherten Datei. „Speichern & zurück“ baut Gebäude, Räume, Portale und Türen neu – hier eingefügte Objekte bleiben erhalten.', 'info', 12000);

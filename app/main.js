@@ -18,7 +18,7 @@ const TEXCONV = isPacked ? path.join(ROOT, 'tools', 'texconv.exe') : path.join(R
 const BRIDGE = path.join(ROOT, 'blender', 'gta_tool_bridge.py');
 const TEMP_ROOT = path.join(os.tmpdir(), 'GTATool');
 
-const startView = process.argv.includes('--vehicle-studio') ? 'vehicles' : process.argv.includes('--clothing-studio') ? 'clothing' : process.argv.includes('--mlo-studio') ? 'mlo' : process.argv.includes('--anim-studio') ? 'anim' : process.argv.includes('--prop-studio') ? 'prop' : 'start';
+const startView = process.argv.includes('--vehicle-studio') ? 'vehicles' : process.argv.includes('--clothing-studio') ? 'clothing' : process.argv.includes('--mlo-studio') ? 'mlo' : process.argv.includes('--anim-studio') ? 'anim' : process.argv.includes('--prop-studio') ? 'prop' : process.argv.includes('--weapon-studio') ? 'weapon' : 'start';
 const startFiles = process.argv.slice(1).filter((a) => !a.startsWith('--') && /\.(rpf|yft|ytd|meta)$/i.test(a) && fs.existsSync(a));
 
 let win = null;
@@ -270,7 +270,7 @@ async function loadKeys() {
 // ------------------------------------------------------------------ Sitzung (kein Projekt!)
 
 // Jede Oberfläche (Fahrzeuge, Kleidung) hat ihre eigene Sitzung; „sessionDir“ zeigt auf die aktive.
-const sessions = { vehicles: null, clothing: null, mlo: null, anim: null, prop: null };
+const sessions = { vehicles: null, clothing: null, mlo: null, anim: null, prop: null, weapon: null };
 let activeStudio = 'vehicles';
 Object.defineProperty(globalThis, 'sessionDir', {
   get: () => sessions[activeStudio],
@@ -419,6 +419,7 @@ function registerIpc() {
       folder: { title: 'Ordner importieren', properties: ['openDirectory', 'multiSelections'] },
       files: { title: 'Dateien öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Dateien', extensions: ['yft', 'ytd', 'meta', 'xml', 'rpf', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       propfiles: { title: 'Props öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Props', extensions: ['ydr', 'yft', 'ytd', 'ytyp', 'ybn', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      weaponfiles: { title: 'Waffen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Waffen', extensions: ['ydr', 'ytd', 'meta', 'xml', 'rpf', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       animfiles: { title: 'Animationen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Animationen', extensions: ['ycd', 'xml', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       images: { title: 'Bild wählen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
       image: { title: 'Bild wählen', properties: ['openFile'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
@@ -430,7 +431,7 @@ function registerIpc() {
       exe: { title: 'Programm wählen', properties: ['openFile'], filters: [{ name: 'Programm', extensions: ['exe'] }] },
       gta: { title: 'GTA-V-Ordner wählen (mit GTA5.exe)', properties: ['openDirectory'] },
     }[kind];
-    const importKinds = ['folder', 'files', 'animfiles', 'propfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
+    const importKinds = ['folder', 'files', 'animfiles', 'propfiles', 'weaponfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
     const isImport = importKinds.includes(kind);
     const start = isImport ? settings.lastImportDir : kind === 'outdir' ? (settings.lastResourceDir || settings.lastExportDir) : null;
     if (start && fs.existsSync(start)) opts.defaultPath = start;
@@ -491,11 +492,67 @@ function registerIpc() {
   handle('world:status', async () => call('world.status', { cacheFile: worldCache() }));
   handle('world:build', async () => call('world.build', { gtaPath: settings.gtaPath || '', cacheFile: worldCache() }));
   handle('world:area', async ({ x, y, radius }) => call('world.area', { gtaPath: settings.gtaPath || '', cacheFile: worldCache(), propsCache: propsCache(), x, y, radius: radius || 120, max: 1500 }));
-  handle('world:archGlb', async ({ name }) => {
+  const archGlbFile = async (name) => {
     const out = path.join(app.getPath('userData'), 'gta-objekte-glb', `${String(name).replace(/[^\w.-]/g, '_')}.glb`);
     if (!fs.existsSync(out)) await call('world.archGlb', { gtaPath: settings.gtaPath || '', propsCache: propsCache(), propsDir: propsDir(), name, outFile: out });
-    return { glb: fs.readFileSync(out) };
-  });
+    return out;
+  };
+  handle('world:archGlb', async ({ name }) => ({ glb: fs.readFileSync(await archGlbFile(name)) }));
+  /** Umliegende GTA-Gebäude für Blender (nur Referenz): GLB-Datei je Modell und alle Platzierungen. */
+  async function surroundingsFile(work, pos, size, place, mloRefs) {
+    const file = path.join(work, 'umgebung.json');
+    const mlo = mloRefs ? await mloReferenceGlbs(work, mloRefs, place && place.inst) : [];
+    if (!pos) {   // Position in der Welt unbekannt → nur das Interior als Referenz
+      fs.writeFileSync(file, JSON.stringify({ models: [], place: place || null, mlo }));
+      return { file, count: 0, failed: 0, mlo: mlo.length };
+    }
+    const st = await call('world.status', { cacheFile: worldCache() }).catch(() => null);
+    if (!st || !st.built) await call('world.build', { gtaPath: settings.gtaPath || '', cacheFile: worldCache() });
+    const radius = Math.max(40, Math.hypot(size[0], size[1]) / 2 + 30);
+    const area = await call('world.area', { gtaPath: settings.gtaPath || '', cacheFile: worldCache(), propsCache: propsCache(), x: pos[0], y: pos[1], radius, max: 600 });
+    const byName = new Map();
+    for (const e of area.entities) { if (!byName.has(e.name)) byName.set(e.name, []); byName.get(e.name).push({ position: e.position, rotation: e.rotation, scale: e.scale }); }
+    const models = [];
+    let n = 0, failed = 0;
+    for (const name of area.archetypes) {
+      n++;
+      send('progress', { text: `Umliegende Gebäude für Blender: ${n} / ${area.archetypes.length} …`, percent: Math.round((100 * n) / area.archetypes.length) });
+      try { models.push({ name, glb: await archGlbFile(name), entities: byName.get(name) }); } catch { failed++; }
+    }
+    fs.writeFileSync(file, JSON.stringify({ models, place: place || null, mlo }));
+    return { file, count: area.entities.length, failed, mlo: mlo.length };
+  }
+  /** Rest des Interiors als GLB (Koordinaten relativ zum Interior): eigene Modelle, GTA-Objekte, Kollisionen. */
+  async function mloReferenceGlbs(work, refs, inst) {
+    const dir = path.join(work, 'referenz');
+    fs.mkdirSync(dir, { recursive: true });
+    const out = [];
+    const total = (refs.models || []).length + (refs.gta || []).length + (refs.collisions || []).length;
+    let n = 0;
+    const step = () => send('progress', { text: `Interior-Teile für Blender: ${++n} / ${total} …`, percent: Math.round((100 * n) / Math.max(1, total)) });
+    const safe = (s) => String(s).replace(/[^\w.-]/g, '_');
+    for (const m of refs.models || []) {
+      step();
+      const glb = path.join(dir, `${safe(path.basename(m.file))}.glb`);
+      try {
+        await call('model.glb', { file: abs(m.file), ytds: (m.ytds || []).map(abs), outFile: glb, attachYft: null, attachBone: null, livery: null, hideBones: [], variantTexture: 'false' });
+        out.push({ kind: 'model', name: path.basename(m.file), glb, entities: m.entities });
+      } catch (e) { logLine(`Referenz ${m.file}: ${e.message}`); }
+    }
+    for (const g of refs.gta || []) {
+      step();
+      try { out.push({ kind: 'model', name: g.name, glb: await archGlbFile(g.name), entities: g.entities }); } catch { /* nicht darstellbar */ }
+    }
+    for (const c of refs.collisions || []) {
+      step();
+      const glb = path.join(dir, `${safe(path.basename(c))}.glb`);
+      try {
+        await call('mlo.collisionGlb', { ybn: abs(c), outFile: glb, mloPos: inst ? inst.pos : null, mloRot: inst ? inst.rot : null, clipMin: null, clipMax: null });
+        out.push({ kind: 'collision', name: path.basename(c), glb, entities: [{ position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1] }] });
+      } catch (e) { logLine(`Referenz ${c}: ${e.message}`); }
+    }
+    return out;
+  }
 
   // Neues Interior: Karte, Bodenhöhe, Blender
   handle('map:glb', async () => {
@@ -506,7 +563,7 @@ function registerIpc() {
   handle('map:height', async ({ x, y }) => call('map.height', { gtaPath: settings.gtaPath || '', x, y, flipY: 'false' }));
   const blendSource = (n) => path.join(app.getPath('userData'), 'blender-quellen', `${n}.blend`);
   handle('mlo:blendSource', async ({ name }) => ({ exists: fs.existsSync(blendSource(String(name || '').toLowerCase())) }));
-  handle('mlo:newInBlender', async ({ name, pos, heading, size, reopen }) => {
+  handle('mlo:newInBlender', async ({ name, pos, heading, size, reopen, surroundings }) => {
     requireBlender();
     const n = String(name || '').trim().toLowerCase();
     if (!/^[a-z0-9_-]{1,50}$/.test(n)) throw new Error('Bitte einen gültigen Namen eingeben (a–z, 0–9, _ und -).');
@@ -531,6 +588,13 @@ function registerIpc() {
     if (reopen && fs.existsSync(blend)) args.push(blend);
     args.push('--python', BRIDGE, '--', '--new-mlo', n, '--pos', p.join(','), '--heading', String(Number(heading) || 0), '--size', s3.join(','),
       '--doors', doorsFile, '--blend-save', blend, '--export', exportDir, '--status', statusFile);
+    let envInfo = null;
+    if (surroundings !== false) {
+      try {
+        envInfo = await surroundingsFile(work, p, s3);
+        args.push('--surroundings', envInfo.file);
+      } catch (e) { envInfo = { error: e.message }; logLine(`Umgebung für Blender nicht geladen: ${e.message}`); }
+    }
     const proc = spawn(settings.blenderPath, args, { detached: false, stdio: 'ignore' });
     const entry = { proc, lastExport: 0 };
     blenderSessions.set(key, entry);
@@ -549,7 +613,7 @@ function registerIpc() {
     }, 1000);
     proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'closed', studio: 'mlo' }); });
     proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(key); send('blender', { model: key, state: 'error', error: e.message, studio: 'mlo' }); });
-    return { ok: true, key, reopened: !!(reopen && fs.existsSync(blend)) };
+    return { ok: true, key, reopened: !!(reopen && fs.existsSync(blend)), surroundings: envInfo };
   });
   handle('mlo:export', async ({ outDir, resourceName }) => {
     rememberExportDir(outDir);
@@ -558,7 +622,7 @@ function registerIpc() {
   handle('props:status', async () => call('props.status', { cacheFile: propsCache() }));
   handle('props:build', async () => call('props.build', { gtaPath: settings.gtaPath || '', cacheFile: propsCache() }));
   handle('props:search', async ({ term }) => call('props.search', { cacheFile: propsCache(), term, max: 300 }));
-  handle('mlo:blender', async ({ file, ytds, studio: st }) => {
+  handle('mlo:blender', async ({ file, ytds, studio: st, surroundings }) => {
     const studio = st || 'mlo';
     requireBlender();
     if (blenderSessions.has(file)) throw new Error('Diese Datei ist bereits in Blender geöffnet.');
@@ -567,7 +631,17 @@ function registerIpc() {
     const prep = await call('blender.prepareFile', { sessionDir: sd, file, workDir: path.join(work, 'in'), ytds: ytds || [] });
     const exportDir = path.join(work, 'out');
     const statusFile = path.join(work, 'status.json');
-    const proc = spawn(settings.blenderPath, ['--python', BRIDGE, '--', '--file', prep.file, '--export', exportDir, '--status', statusFile], { detached: false, stdio: 'ignore' });
+    try { fs.rmSync(statusFile, { force: true }); } catch { /* alter Stand einer früheren Blender-Sitzung */ }
+    const bargs = ['--python', BRIDGE, '--', '--file', prep.file, '--export', exportDir, '--status', statusFile];
+    let envInfo = null;
+    // Umliegende GTA-Gebäude zur Orientierung (center = Weltposition, place = wie die Datei in der Welt liegt)
+    if (surroundings && surroundings.place) {
+      try {
+        envInfo = await surroundingsFile(work, surroundings.center || null, surroundings.size || [40, 40], surroundings.place, surroundings.mlo);
+        bargs.push('--surroundings', envInfo.file);
+      } catch (e) { envInfo = { error: e.message }; logLine(`Umgebung für Blender nicht geladen: ${e.message}`); }
+    }
+    const proc = spawn(settings.blenderPath, bargs, { detached: false, stdio: 'ignore' });
     const entry = { proc, lastExport: 0 };
     blenderSessions.set(file, entry);
     let lastErr = null;
@@ -585,7 +659,7 @@ function registerIpc() {
     }, 1000);
     proc.on('exit', () => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'closed', studio }); });
     proc.on('error', (e) => { clearInterval(poll); blenderSessions.delete(file); send('blender', { model: file, state: 'error', error: e.message, studio }); });
-    return { ok: true };
+    return { ok: true, surroundings: envInfo };
   });
 
   // ------------------------------------------------ Kleidung
@@ -675,6 +749,7 @@ function registerIpc() {
     const body = base[ped].parts.filter((x) => x.comp !== prep.comp).map((x) => x.model).join(';');
     const exportDir = path.join(work, 'out');
     const statusFile = path.join(work, 'status.json');
+    try { fs.rmSync(statusFile, { force: true }); } catch { /* alter Stand einer früheren Blender-Sitzung */ }
     const proc = spawn(settings.blenderPath, ['--python', BRIDGE, '--', '--ydd', prep.file, '--skeleton', base[ped].skeleton,
       '--body', body, '--export', exportDir, '--status', statusFile], { detached: false, stdio: 'ignore' });
     const entry = { proc, lastExport: 0 };
@@ -759,6 +834,41 @@ function registerIpc() {
   handle('prop:export', async ({ outDir, resourceName, testCommand }) => {
     rememberExportDir(outDir);
     return call('prop.export', { sessionDir, outDir, resourceName, testCommand: testCommand ? 'true' : 'false', backupDir: backupDir() });
+  });
+
+  // ------------------------------------------------ Waffen
+  handle('weapon:open', async ({ paths, add }) => {
+    rememberImport(paths);
+    if (!add || !sessionDir) newSessionDir();
+    const r = await call('session.open', { paths, sessionDir });
+    const model = await call('weapon.analyze', { sessionDir });
+    return { ...model, warnings: [...(r.warnings || []).filter((w) => !/keine verwendbaren/.test(w)), ...model.warnings] };
+  });
+  handle('weapon:analyze', async () => call('weapon.analyze', { sessionDir }));
+  handle('weapon:setLabel', async ({ weapon, text }) => call('weapon.setLabel', { sessionDir, weapon, text, backupDir: backupDir() }));
+  // Normales Modell auch als Hochdetail-Modell (_hi, in der Hand/Ego-Perspektive) übernehmen
+  handle('weapon:copyToHi', async ({ file, hi }) => call('file.replace', { file: abs(hi), source: abs(file), backupDir: backupDir() }));
+  const weaponCache = () => path.join(app.getPath('userData'), 'gta-waffen.json');
+  const weaponDir = () => path.join(app.getPath('userData'), 'gta-waffen');
+  handle('weapon:gtaStatus', async () => call('weapon.gtaStatus', { cacheFile: weaponCache(), propsCache: propsCache() }));
+  handle('weapon:gtaBuild', async () => call('weapon.gtaBuild', { gtaPath: settings.gtaPath || '', cacheFile: weaponCache(), propsCache: propsCache() }));
+  handle('weapon:gtaSearch', async ({ term, parts }) => call('weapon.gtaSearch', { cacheFile: weaponCache(), term: term || '', parts: parts ? 'true' : 'false' }));
+  handle('weapon:gtaPreview', async ({ model }) => {
+    const x = await call('weapon.gtaExtract', { gtaPath: settings.gtaPath || '', propsCache: propsCache(), model, cacheDir: weaponDir() });
+    const outFile = path.join(TEMP_ROOT, 'gta-vorschau', 'waffen', `${String(model).replace(/[^\w.-]/g, '_')}-${Date.now()}.glb`);
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
+    const info = await call('model.glb', { file: x.model, ytds: x.ytds, outFile, attachYft: null, attachBone: null, livery: null, hideBones: [], variantTexture: 'false' });
+    const glb = fs.readFileSync(outFile);
+    fs.rm(outFile, { force: true }, () => {});
+    return { ...info, glb };
+  });
+  handle('weapon:addFromGta', async ({ model }) => {
+    if (!sessionDir) newSessionDir();
+    return call('weapon.addFromGta', { sessionDir, gtaPath: settings.gtaPath || '', propsCache: propsCache(), model, cacheDir: weaponDir() });
+  });
+  handle('weapon:export', async ({ outDir, resourceName, testCommand }) => {
+    rememberExportDir(outDir);
+    return call('weapon.export', { sessionDir, outDir, resourceName, testCommand: testCommand ? 'true' : 'false' });
   });
 
   // ------------------------------------------------ Animationen
@@ -856,6 +966,16 @@ function registerIpc() {
   handle('tex:replace', async ({ file, name, image }) => call('textures.replace', { file: abs(file), name, image, backupDir: backupDir() }));
   handle('tex:add', async ({ file, images }) => call('textures.add', { file: abs(file), images, backupDir: backupDir() }));
   handle('tex:remove', async ({ file, names }) => call('textures.remove', { file: abs(file), names, backupDir: backupDir() }));
+  // Textur aus einer Datei in eine andere übernehmen (Waffen: normale ⇄ +hi-Texturdatei gleich halten)
+  handle('tex:copyTo', async ({ file, name, target }) => {
+    const dir = path.join(sessionDir, 'abgleich', String(Date.now()));
+    const r = await call('textures.export', { file: abs(file), names: [name], outDir: dir, format: 'png' });
+    const png = (r.files || [])[0];
+    if (!png) throw new Error(`Textur „${name}“ konnte nicht übernommen werden.`);
+    const res = await call('textures.replace', { file: abs(target), name, image: png, backupDir: backupDir() });
+    fs.rm(dir, { recursive: true, force: true }, () => {});
+    return res;
+  });
   handle('tex:edit', async ({ file, name }) => {
     const editDir = path.join(sessionDir, 'bearbeiten', path.basename(file, path.extname(file)));
     const res = await call('textures.export', { file: abs(file), names: [name], outDir: editDir, format: 'png' });
@@ -1096,6 +1216,18 @@ function createWindow() {
   ipcMain.removeHandler('app:close-confirmed');
   ipcMain.handle('app:close-confirmed', () => { confirmed = true; win.close(); });
 }
+
+// Fehler aus Netzwerk-Bibliotheken (z. B. SFTP-Zeitüberschreitung) dürfen das Tool nicht abstürzen lassen
+process.on('uncaughtException', (err) => {
+  try { logLine(`[uncaught] ${(err && err.stack) || err}`); } catch { /* egal */ }
+  const m = String((err && err.message) || err || '');
+  // SFTP-Bibliothek: dieselbe Zeitüberschreitung wird zusätzlich sauber über die Verbindung gemeldet → nur protokollieren
+  if (/ssh2/.test(String(err && err.stack))) return;
+  const text = /handshake|Timed out|ETIMEDOUT|ECONNRESET|connect:/i.test(m)
+    ? 'Der Server hat nicht rechtzeitig geantwortet. Bitte später noch einmal versuchen (Server erreichbar? Internet?).'
+    : `Unerwarteter Fehler: ${m}`;
+  try { send('toast', { text, type: 'error' }); } catch { /* Fenster evtl. noch nicht da */ }
+});
 
 app.whenReady().then(() => {
   loadSettings();

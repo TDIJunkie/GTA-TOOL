@@ -35,6 +35,9 @@ if (fs.existsSync(exe)) {
   const lnk5 = path.join(unpacked, 'Prop Studio.lnk');
   const ps5 = ps.replace(lnk.replace(/'/g, "''"), lnk5.replace(/'/g, "''")).replace('--vehicle-studio', '--prop-studio').replace('GTA Tool – Vehicle Studio', 'GTA Tool – Prop Studio');
   execSync(`powershell -NoProfile -Command "${ps5.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
+  const lnk6 = path.join(unpacked, 'Weapon Studio.lnk');
+  const ps6 = ps.replace(lnk.replace(/'/g, "''"), lnk6.replace(/'/g, "''")).replace('--vehicle-studio', '--weapon-studio').replace('GTA Tool – Vehicle Studio', 'GTA Tool – Weapon Studio');
+  execSync(`powershell -NoProfile -Command "${ps6.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
   console.log('> Fertig:', exe);
   console.log('> Direktstart Vehicle Studio:', lnk);
 }
