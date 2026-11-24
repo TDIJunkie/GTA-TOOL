@@ -10,6 +10,7 @@ const ClothingStudio = (() => {
     variant: {},       // id -> Texturdatei (gewählte Variante)
     showBody: true,
     offset: { x: 0, y: 0, z: 0, s: 1 },
+    uvShift: { x: 0, y: 0, s: 1 },   // Textur verschieben (Live-Vorschau, Anteile der Texturbreite)
     dirty: false,
     body: null,        // Freemode-Grundkörper (aus GTA)
     previewVersion: 0,
@@ -127,7 +128,7 @@ const ClothingStudio = (() => {
     $('cs-status-text').textContent = `${S.model.items.length} Kleidungsstücke · ${S.model.addonCount} Addon · ${S.model.replaceCount} Replace${S.dirty ? ' · ● Änderungen nicht exportiert' : ''}`;
   }
 
-  function select(sel) { S.sel = sel; S.offset = { x: 0, y: 0, z: 0, s: 1 }; renderTree(); render(); }
+  function select(sel) { S.sel = sel; S.offset = { x: 0, y: 0, z: 0, s: 1 }; S.uvShift = { x: 0, y: 0, s: 1 }; renderTree(); render(); }
 
   function renderTree() {
     const tree = $('cs-tree');
@@ -218,6 +219,7 @@ const ClothingStudio = (() => {
 
     // Position
     wrap.append(positionPanel(it));
+    if (variantFile) wrap.append(texShiftPanel(it, variantFile));
 
     // Aktionen
     wrap.append(h('div.actions',
@@ -266,6 +268,59 @@ const ClothingStudio = (() => {
           },
         }, 'Übernehmen'),
         h('button.btn', { onclick: () => { S.offset = { x: 0, y: 0, z: 0, s: 1 }; render(true); } }, 'Zurücksetzen')));
+  }
+
+  /** Verschiebung/Größe → Textur-Transformation (uv' = uv·rep + offset), skaliert um die Bildmitte. */
+  function uvParams() {
+    const u = S.uvShift;
+    const r = 1 / u.s;
+    return { ox: 0.5 * (1 - r) - u.x * r, oy: 0.5 * (1 - r) - u.y * r, rep: r };
+  }
+  function applyUvPreview() {
+    if (!window.Viewer3D || !window.Viewer3D.setMainUv) return;
+    const q = uvParams();
+    window.Viewer3D.setMainUv(q.ox, q.oy, q.rep);
+  }
+
+  function texShiftPanel(it, variantFile) {
+    const u = S.uvShift;
+    const cur = it.textures.find((t) => t.file === variantFile);
+    const val = h('span.muted.small');
+    const show = () => { val.textContent = `Waagerecht ${(u.x * 100).toFixed(1)} % · Senkrecht ${(u.y * 100).toFixed(1)} % · Größe ${(u.s * 100).toFixed(0)} %`; };
+    const slider = (label, key, min, max, step) => h('label.pos-row', h('span', label),
+      h('input', {
+        type: 'range', min, max, step, value: u[key] * 100,
+        oninput: (e) => { u[key] = Number(e.target.value) / 100; show(); applyUvPreview(); },
+      }));
+    const allCb = h('input', { type: 'checkbox' });
+    show();
+    return h('details.mount-panel', { open: S.uvOpen || null, ontoggle: (e) => { S.uvOpen = e.target.open; } },
+      h('summary', '🎨 Textur auf dem Kleidungsstück verschieben'),
+      h('p.muted.small', 'Schiebt das Muster/Motiv der Textur über das Kleidungsstück – mit Live-Vorschau. Was über den Rand hinausgeht, kommt auf der anderen Seite wieder herein (wie bei einer Kachel). Erst „Übernehmen“ ändert die Texturdatei (vorher wird ein Backup angelegt).'),
+      h('div.pos-grid',
+        slider('← Waagerecht →', 'x', -50, 50, 0.1),
+        slider('↕ Senkrecht', 'y', -50, 50, 0.1),
+        slider('Größe', 's', 25, 400, 1)),
+      val,
+      h('label.check.small', { style: { marginTop: '6px' } }, allCb, ` Für alle ${it.textures.length} Varianten übernehmen (sonst nur Variante ${cur ? cur.letter.toUpperCase() : ''})`),
+      h('div.row.gap-s', { style: { marginTop: '8px' } },
+        h('button.btn.primary', {
+          onclick: async () => {
+            if (u.x === 0 && u.y === 0 && u.s === 1) { toast('Keine Änderung eingestellt.', 'info'); return; }
+            const q = uvParams();
+            const files = allCb.checked ? it.textures.map((t) => t.file) : [variantFile];
+            for (const f of files) {
+              const r = await call('tex:transform', { file: f, names: [], ox: q.ox, oy: q.oy, rep: q.rep },
+                { busyText: files.length > 1 ? `Textur wird angepasst (${files.indexOf(f) + 1}/${files.length}) …` : 'Textur wird angepasst …' });
+              if (!r) return;
+              delete S.texCache[f];
+            }
+            S.dirty = true; changed(); S.uvShift = { x: 0, y: 0, s: 1 };
+            toast('✓ Textur verschoben.');
+            render(true);
+          },
+        }, 'Übernehmen'),
+        h('button.btn', { onclick: () => { S.uvShift = { x: 0, y: 0, s: 1 }; render(true); } }, 'Zurücksetzen')));
   }
 
   async function texturesSection(it, variantFile) {
@@ -374,6 +429,7 @@ const ClothingStudio = (() => {
       if (!sameItem) V.fitAll();
       S.lastViewItem = it.id;
       V.setMainOffset(S.offset.x, S.offset.y, S.offset.z, S.offset.s);
+      applyUvPreview();
       status.textContent = `${m.triangles.toLocaleString('de-DE')} Dreiecke${parts.length ? ' · auf dem Freemode-Körper' : ''}`;
     } catch (e) {
       if (my !== token) return;

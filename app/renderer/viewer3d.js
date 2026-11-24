@@ -238,6 +238,23 @@ function applyMainOffset() {
 
 /** Live-Vorschau für Verschieben (Meter) und Skalieren der Kleidung. */
 function setMainOffset(x, y, z, s) { mainOffset = { x, y, z, s }; applyMainOffset(); }
+/** Live-Vorschau: Texturen des Hauptmodells verschieben/skalieren (uv' = uv·repeat + offset, Kachel-Wiederholung). */
+function setMainUv(ox, oy, rep) {
+  if (!main) return;
+  const keys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap'];
+  main.traverse((o) => {
+    if (!o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      for (const k of keys) {
+        const t = m[k];
+        if (!t) continue;
+        if (t.wrapS !== THREE.RepeatWrapping || t.wrapT !== THREE.RepeatWrapping) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; }
+        t.offset.set(ox, oy); t.repeat.set(rep, rep); t.rotation = 0; t.center.set(0, 0);
+      }
+    }
+  });
+  needsRender = true;
+}
 function setGround(mode) { groundMode = mode; }
 function fitAll() {
   const g = new THREE.Group();
@@ -938,5 +955,5 @@ function worldHas(name) { return worldTemplates.has(name); }
 
 window.Viewer3D = { worldShow, worldAdd, worldSetObject, worldModeSet, worldSnap, worldSetValues, worldFocusObject, worldHide, worldOn, worldHas, mapShow, mapHide, mapFocus, mapSetMarker, mapOn, mapIsActive, animLoadRig, animSetClip, animPlay, animSeek, animSpeed, animSetLoop, animSetFollow, animOn, animState, animHasRig, animFit, animDispose, renderNow: () => { controls.update(); renderer.render(scene, camera); },
   sceneLoad, sceneSelect, sceneFocus, sceneMode, sceneUpdate, sceneFilter, sceneSetCollision, sceneOn, sceneClear, fitObject: () => sceneRoot && fitObject(sceneRoot),
-   setMainOffset, setGround, fitAll, mount, load, loadOverlay, clearOverlay, clear, setExtras, setPaint, resetView, view, debugInfo };
+   setMainOffset, setMainUv, setGround, fitAll, mount, load, loadOverlay, clearOverlay, clear, setExtras, setPaint, resetView, view, debugInfo };
 window.dispatchEvent(new Event('viewer3d-ready'));

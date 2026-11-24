@@ -244,6 +244,31 @@ public static class Session
         return i >= 0 ? inner[(i + 1)..] : inner;
     }
 
+    /// <summary>
+    /// Ziel einer Meta-Datei: data/&lt;quelle&gt;/vehicles.meta. Packs mit mehreren Fahrzeugen haben oft
+    /// je Fahrzeug einen Ordner (data/auto1/vehicles.meta, data/auto2/vehicles.meta …) – gleichnamige Dateien
+    /// aus einem anderen Ordner kommen dann in einen eigenen Unterordner, statt sich zu überschreiben.
+    /// </summary>
+    static string MetaTarget(string src, string lower, string origin, List<IndexEntry> index)
+    {
+        string Norm(string p) => p.Replace('\\', '/');
+        var flat = Norm(Path.Combine("data", src, lower));
+        var taken = index.FirstOrDefault(x => x.File.Equals(flat, StringComparison.OrdinalIgnoreCase));
+        if (taken == null || string.Equals(taken.Origin, origin, StringComparison.OrdinalIgnoreCase)) return flat;
+        // Gleiche Datei aus einem anderen Ordner → Unterordner nach dem Ordnernamen
+        var parts = Norm(origin ?? "").Split('/');
+        var folder = SafeName(parts.Length >= 2 ? parts[^2] : "teil");
+        if (folder.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase)) folder = folder[..^4];
+        if (string.IsNullOrEmpty(folder) || folder.Equals(src, StringComparison.OrdinalIgnoreCase) || folder.Equals("data", StringComparison.OrdinalIgnoreCase)) folder = "teil";
+        for (int n = 1; ; n++)
+        {
+            var sub = n == 1 ? folder : $"{folder}_{n}";
+            var rel = Norm(Path.Combine("data", src, sub, lower));
+            var e = index.FirstOrDefault(x => x.File.Equals(rel, StringComparison.OrdinalIgnoreCase));
+            if (e == null || string.Equals(e.Origin, origin, StringComparison.OrdinalIgnoreCase)) return rel;
+        }
+    }
+
     static int Take(string name, Func<byte[]> read, string origin, string src, string sessionDir, List<IndexEntry> index, List<string> warnings)
     {
         var ext = Path.GetExtension(name).ToLowerInvariant();
@@ -257,7 +282,7 @@ public static class Session
             relTarget = Path.Combine("stream", lower);
         }
         else if (ext == ".meta" || (ext == ".xml" && !lower.StartsWith("content") && !lower.StartsWith("setup2")) || ext == ".ymt")
-            relTarget = Path.Combine("data", src, lower);
+            relTarget = MetaTarget(src, lower, origin, index);
         else if (ext == ".gxt2")
         {
             var lang = LanguageOf(origin);

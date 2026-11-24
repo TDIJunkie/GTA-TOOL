@@ -162,6 +162,10 @@ Eigene Sitzung je Studio (`sessions.vehicles/clothing` in main.js, `globalThis.s
 - [x] **Addon ⇄ Replace**: Addon → Replace mit wählbarer GTA-Nummer; Replace → Addon in Sammlung `mp_m_/mp_f_<name>`.
 - [x] **Texturen zu Original-GTA-Kleidung**: Katalog aller 5540 Original-Teile (Basisspiel + DLCs, Patches beachtet),
       Browser mit 3D-Vorschau, Übernahme als Addon (mit/ohne Original-Texturen) → eigene Varianten hinzufügen.
+      Liste zeigt Original-Namen (`jbib_000_u`, Texturen `a_uni …`) mit Suche.
+- [x] **Textur verschieben**: Regler waagerecht/senkrecht/Größe mit Live-Vorschau (`Viewer3D.setMainUv`, Kachel-Wiederholung);
+      „Übernehmen“ → `textures.transform` rechnet alle Texturen der Datei um (bilinear, gleiches Format/Mipmaps),
+      wahlweise für alle Varianten. UVs des Modells bleiben unverändert.
 - [x] **FiveM-Export**: stream (Modelle/Texturen), YMT je Sammlung (CPedVariationInfo per CodeWalker-XML, Rundweg
       geprüft), Shop-Meta (`SHOP_PED_APPAREL_META_FILE`), fxmanifest, LIESMICH; Nummern werden lückenlos gemacht.
 - Getestet mit grzyClothTool-Westen (m/w) und GTA jbib 005. **Im Spiel noch ungetestet.** YMT-Neuaufbau verwirft
@@ -272,6 +276,9 @@ Backend `Animation.cs` (Klasse `Animations`), Oberfläche `anim.js`, Rig-Export 
       nur Einträge für wirklich neue Dateien werden ergänzt; erzeugte .lua/LIESMICH werden nicht übernommen. Resources mit .rpf: alter Weg.
       Name exakt (`ExportMerge.ResName` = `safeResourceName` in main.js: nur ordner-unzulässige Zeichen ersetzt, Groß/klein bleibt);
       Dialoge schlagen den Original-Namen vor (`session:original`, `Sftp.originalName/keepNotice`).
+      Packs mit einem Meta-Ordner je Fahrzeug (`data/auto1/vehicles.meta`, `data/auto2/…`): `Session.MetaTarget` legt gleichnamige
+      Metas aus anderen Ordnern in `data/<quelle>/<ordner>/` ab statt sie zu überschreiben (vorher nur 1 Auto erkannt).
+      Getestet mit hv_restaurants: 14 Fahrzeuge, Export 1:1, Änderung landet nur in `data/hvburger1/vehicles.meta`.
       SFTP-Upload (`sftp.upload`): Stand je Server-Datei (Größe, mtime, MD5) aus Import/Upload in `%APPDATA%\GTA Tool\sftp-stand.json`;
       nur neue/geänderte Dateien hochladen (unklar → `md5sum` per SSH, sonst hochladen), beim Import bekannte und jetzt fehlende Dateien
       löschen, unbekannte Server-Dateien nicht anfassen (werden gemeldet). Vorher Sicherung nur der überschriebenen/gelöschten Dateien

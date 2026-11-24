@@ -254,6 +254,89 @@ public static class Textures
         return new { removed };
     }
 
+    // ------------------------------------------------------------- Verschieben / Skalieren
+
+    /// <summary>
+    /// Textur auf dem Modell verschieben/skalieren, ohne die UVs zu ändern:
+    /// neu(u,v) = alt(u·rep + ox, v·rep + oy) mit Kachel-Wiederholung (wie die Live-Vorschau).
+    /// names leer = alle Texturen der Datei (Farbe, Normal, Glanz bleiben deckungsgleich).
+    /// </summary>
+    public static object Transform(string file, List<string> names, double ox, double oy, double rep, string backupDir)
+    {
+        if (rep <= 0 || double.IsNaN(rep)) throw new UserError("Ungültige Größe.");
+        var c = Open(file);
+        var list = TexList(c);
+        var targets = names.Count > 0 ? list.Where(t => names.Contains(t.Name, StringComparer.OrdinalIgnoreCase)).ToList() : list.ToList();
+        if (targets.Count == 0) throw new UserError("Keine Textur zum Verschieben gefunden.");
+        var tmp = TempDir();
+        try
+        {
+            int i = 0;
+            foreach (var old in targets)
+            {
+                Program.Progress($"Textur {old.Name} wird angepasst …", (int)(90.0 * i++ / targets.Count));
+                int w = old.Width, h = old.Height;
+                var src = FullPixels(old, tmp);
+                var dst = new byte[w * h * 4];
+                for (int y = 0; y < h; y++)
+                {
+                    double v = ((y + 0.5) / h) * rep + oy;
+                    for (int x = 0; x < w; x++)
+                    {
+                        double u = ((x + 0.5) / w) * rep + ox;
+                        SampleWrap(src, w, h, u * w - 0.5, v * h - 0.5, dst, (y * w + x) * 4);
+                    }
+                }
+                var png = Path.Combine(tmp, Safe(old.Name) + "_" + i + ".png");
+                File.WriteAllBytes(png, Png.EncodeBgra(dst, w, h));
+                var neu = BuildTexture(png, old.Name, old.Format, keepFormatFromDds: false);
+                list[list.IndexOf(old)] = neu;
+                RelinkShaders(c, old, neu);
+            }
+            Write(c, list, backupDir);
+            Program.Progress("Fertig.", 100);
+            return new { changed = targets.Select(t => t.Name).ToList() };
+        }
+        finally { TryDelete(tmp); }
+    }
+
+    /// <summary>Volle Pixel (BGRA) einer Textur – direkt oder über texconv (z. B. BC7).</summary>
+    static byte[] FullPixels(Texture t, string tmp)
+    {
+        int w = t.Width, h = t.Height;
+        try { var px = DDSIO.GetPixels(t, 0); if (px != null && px.Length >= w * h * 4) return px; } catch { }
+        var dir = Path.Combine(tmp, "raw_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        var dds = Path.Combine(dir, "t.dds");
+        File.WriteAllBytes(dds, DDSIO.GetDDSFile(t));
+        var outDir = Path.Combine(dir, "out");
+        Directory.CreateDirectory(outDir);
+        Texconv(new[] { "-f", "B8G8R8A8_UNORM", "-m", "1", "-y", "-o", outDir, "--", dds });
+        var raw = File.ReadAllBytes(Path.Combine(outDir, "t.dds"));
+        int hdr = 128 + (raw.Length > 88 && raw[84] == 'D' && raw[85] == 'X' && raw[86] == '1' && raw[87] == '0' ? 20 : 0);
+        if (raw.Length < hdr + w * h * 4) throw new UserError($"Textur {t.Name} konnte nicht gelesen werden.");
+        var o = new byte[w * h * 4];
+        Buffer.BlockCopy(raw, hdr, o, 0, o.Length);
+        return o;
+    }
+
+    /// <summary>Bilineares Abtasten mit Wiederholung an den Rändern.</summary>
+    static void SampleWrap(byte[] px, int w, int h, double fx, double fy, byte[] dst, int di)
+    {
+        int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+        double ax = fx - x0, ay = fy - y0;
+        int Wx(int x) => ((x % w) + w) % w;
+        int Wy(int y) => ((y % h) + h) % h;
+        int i00 = (Wy(y0) * w + Wx(x0)) * 4, i10 = (Wy(y0) * w + Wx(x0 + 1)) * 4;
+        int i01 = (Wy(y0 + 1) * w + Wx(x0)) * 4, i11 = (Wy(y0 + 1) * w + Wx(x0 + 1)) * 4;
+        for (int k = 0; k < 4; k++)
+        {
+            double top = px[i00 + k] * (1 - ax) + px[i10 + k] * ax;
+            double bot = px[i01 + k] * (1 - ax) + px[i11 + k] * ax;
+            dst[di + k] = (byte)Math.Clamp((int)Math.Round(top * (1 - ay) + bot * ay), 0, 255);
+        }
+    }
+
     internal static void RelinkShaders(Container c, Texture oldTex, Texture newTex)
     {
         foreach (var sg in c.ShaderGroups)

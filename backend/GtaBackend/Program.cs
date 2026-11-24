@@ -70,6 +70,7 @@ public static class Program
         "textures.replace" => Textures.Replace(p.Str("file"), p.Str("name"), p.Str("image"), p.Str("backupDir")),
         "textures.add" => Textures.Add(p.Str("file"), p.StrList("images"), p.Str("backupDir")),
         "textures.remove" => Textures.Remove(p.Str("file"), p.StrList("names"), p.Str("backupDir")),
+        "textures.transform" => Textures.Transform(p.Str("file"), p.StrList("names"), p.Float("ox"), p.Float("oy"), p.Float("rep", 1f), p.Str("backupDir")),
         "blender.prepare" => BlenderBridge.Prepare(p.Str("sessionDir"), p.Str("model"), p.StrList("ytds")),
         "blender.apply" => BlenderBridge.Apply(p.Str("sessionDir"), p.Str("exportDir"), p.Str("model"), p.Str("backupDir")),
         "debug.yft" => DebugInfo.Yft(p.Str("file")),

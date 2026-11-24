@@ -966,6 +966,7 @@ function registerIpc() {
   handle('tex:replace', async ({ file, name, image }) => call('textures.replace', { file: abs(file), name, image, backupDir: backupDir() }));
   handle('tex:add', async ({ file, images }) => call('textures.add', { file: abs(file), images, backupDir: backupDir() }));
   handle('tex:remove', async ({ file, names }) => call('textures.remove', { file: abs(file), names, backupDir: backupDir() }));
+  handle('tex:transform', async ({ file, names, ox, oy, rep }) => call('textures.transform', { file: abs(file), names: names || [], ox, oy, rep, backupDir: backupDir() }));
   // Textur aus einer Datei in eine andere übernehmen (Waffen: normale ⇄ +hi-Texturdatei gleich halten)
   handle('tex:copyTo', async ({ file, name, target }) => {
     const dir = path.join(sessionDir, 'abgleich', String(Date.now()));
