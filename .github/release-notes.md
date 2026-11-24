@@ -1,14 +1,18 @@
 ## Neu in dieser Version / What's new
 
 **🇩🇪**
-- **SFTP-Export: Zielordner wird geprüft** – wird versehentlich die Resource selbst als Ziel gewählt (z. B. `[mlo]/meine_resource`), lädt das Tool automatisch in den Ordner darüber hoch, statt eine verschachtelte Kopie anzulegen. Als Ziel wird der Ordner vorgeschlagen, aus dem importiert wurde.
-- Leer gewordene Ordner auf dem Server werden nach dem Abgleich entfernt.
-- Aus 0.3.1: Export behält die Original-Resource (Name, Ordner, Dateinamen, fxmanifest, Skripte); per SFTP werden nur geänderte Dateien hochgeladen.
+- **Neu: Weapon Studio 🔫** – Waffen-Packs öffnen (Addon und Replace), Waffen mit Modellen, Komponenten und Munition in 3D ansehen, Namen im Spiel ändern, Texturen bearbeiten, in Blender bearbeiten und als fertige Resource exportieren (Test-Befehl `/waffe`).
+- **Original-GTA-Waffen als Vorlage**: Waffe suchen (deutsche Namen), in 3D ansehen, laden und eigene Texturen einbauen. Normale und Hochdetail-Texturen (`+hi.ytd`) werden automatisch gemeinsam geändert.
+- **Kleidung**: Die Liste der Original-GTA-Kleidung zeigt jetzt die echten Namen (`jbib_000_u` …) und hat eine Suche. Neu: **Textur per Schieberegler** auf dem Kleidungsstück verschieben und skalieren – mit Live-Vorschau.
+- **Fahrzeuge**: Packs mit mehreren Autos und einem Meta-Ordner je Auto werden jetzt vollständig erkannt (vorher nur ein Auto).
+- **MLO / Kollisionen**: Beim Öffnen in Blender wählbar, was mitgeladen wird (nur die Datei, Umgebung, Modelle, Kollisionen). Flache und verformte Kollisionsboxen bleiben nach dem Export erhalten.
 
 **🇬🇧**
-- **SFTP export checks the target folder** – if the resource itself is picked as target (e.g. `[mlo]/my_resource`), the tool uploads to the folder above instead of creating a nested copy. The folder you imported from is suggested as target.
-- Folders on the server that became empty are removed after syncing.
-- From 0.3.1: export keeps the original resource (name, folders, file names, fxmanifest, scripts); SFTP uploads only changed files.
+- **New: Weapon Studio 🔫** – open weapon packs (add-on and replace), view weapons with models, components and ammo in 3D, change in-game names, edit textures, edit in Blender and export as a ready resource (test command `/waffe`).
+- **Original GTA weapons as a template**: search a weapon, view it in 3D, load it and add your own textures. Normal and high-detail textures (`+hi.ytd`) are changed together automatically.
+- **Clothing**: the original GTA clothing list now shows the real names (`jbib_000_u` …) and has a search. New: **move and scale the texture with sliders** on the garment – with live preview.
+- **Vehicles**: packs with several cars and one meta folder per car are now fully detected (previously only one car).
+- **MLO / collisions**: choose what to load when opening in Blender (only the file, surroundings, models, collisions). Flat and reshaped collision boxes are kept after export.
 
 ---
 
