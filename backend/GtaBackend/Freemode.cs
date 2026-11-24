@@ -190,8 +190,22 @@ public static class Freemode
         return new
         {
             collections = colls,
-            items = list.Take(2000).Select(x => new { id = $"{x.Ped}|{x.Coll}|{x.Comp}|{x.Index}", coll = x.Coll, index = x.Index, textures = x.Textures.Count }).ToList(),
+            items = list.Take(2000).Select(x => new
+            {
+                id = $"{x.Ped}|{x.Coll}|{x.Comp}|{x.Index}", coll = x.Coll, index = x.Index, textures = x.Textures.Count,
+                name = ShortName(x.Entry),
+                textureNames = x.Textures.Select(ShortName).ToList(),
+            }).ToList(),
         };
+    }
+
+    /// <summary>„…/mp_m_freemode_01^jbib_000_u.ydd“ → „jbib_000_u“ (Name wie in GTA/CodeWalker).</summary>
+    static string ShortName(string entry)
+    {
+        var f = entry[(Math.Max(entry.LastIndexOf('/'), entry.LastIndexOf(':')) + 1)..];
+        var caret = f.LastIndexOf('^');
+        if (caret >= 0) f = f[(caret + 1)..];
+        return Path.GetFileNameWithoutExtension(f).ToLowerInvariant();
     }
 
     /// <summary>Original-Kleidungsstück (Modell + Texturen) in einen Ordner holen.</summary>

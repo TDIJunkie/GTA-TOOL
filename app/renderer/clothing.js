@@ -494,12 +494,26 @@ const ClothingStudio = (() => {
       if (!r) return;
       collSel.innerHTML = '';
       for (const c of r.collections) collSel.append(h('option', { value: c, selected: c === st2.coll || null }, c === '' ? 'Basisspiel' : c));
+      items = r.items;
+      fillList();
+    }
+
+    let items = [];
+    const search = h('input', { type: 'text', placeholder: 'Suchen, z. B. jbib_015 oder 15', oninput: () => fillList() });
+    function fillList() {
+      const q = search.value.trim().toLowerCase();
+      const shown = items.filter((x) => !q || (x.name || '').includes(q) || String(x.index) === q.replace(/^0+(?=\d)/, '')
+        || (x.textureNames || []).some((t) => t.includes(q)));
       list.innerHTML = '';
-      for (const x of r.items) {
-        list.append(h('div.list-row.clickable', { onclick: (e) => { list.querySelectorAll('.list-row').forEach((n) => n.classList.remove('active')); e.currentTarget.classList.add('active'); preview(x); } },
-          h('span', '👕'), h('div.grow', h('div.name', `Nr. ${String(x.index).padStart(3, '0')}`), h('div.muted.small', `${x.textures} Texturen`))));
+      for (const x of shown) {
+        const tex = (x.textureNames || []).map((t) => t.replace(/^.*?_diff_\d+_/, '')).join(', ');
+        list.append(h('div.list-row.clickable', {
+          title: (x.textureNames || []).join('\n'),
+          onclick: (e) => { list.querySelectorAll('.list-row').forEach((n) => n.classList.remove('active')); e.currentTarget.classList.add('active'); preview(x); },
+        }, h('span', '👕'), h('div.grow', h('div.name', x.name || `Nr. ${String(x.index).padStart(3, '0')}`),
+          h('div.muted.small', `Nr. ${x.index} · ${x.textures} Texturen${tex ? ` (${tex})` : ''}`))));
       }
-      if (!r.items.length) list.append(h('p.muted', 'Keine Teile.'));
+      if (!shown.length) list.append(h('p.muted', items.length ? 'Nichts gefunden.' : 'Keine Teile.'));
     }
 
     async function preview(x) {
@@ -518,7 +532,7 @@ const ClothingStudio = (() => {
         await V.load(m.glb, { keepCamera: true });
         await V.setExtras(ex.map((y) => y.glb));
         V.fitAll();
-        viewerBox.querySelector('.viewer-status').textContent = `Nr. ${x.index} · ${x.textures} Texturen`;
+        viewerBox.querySelector('.viewer-status').textContent = `${x.name || `Nr. ${x.index}`} · ${x.textures} Texturen`;
       } catch (e) { viewerBox.querySelector('.viewer-status').textContent = e.message; }
     }
 
@@ -527,7 +541,7 @@ const ClothingStudio = (() => {
       wide: true,
       body: h('div',
         h('p.muted', 'Wähle ein Original-Kleidungsstück. Es wird als Addon in deine Sammlung kopiert – danach kannst du eigene Texturen hinzufügen oder die vorhandenen ändern. Das Original im Spiel bleibt unverändert.'),
-        h('div.row.gap.wrap', pedSel, compSel, collSel),
+        h('div.row.gap.wrap', pedSel, compSel, collSel, search),
         h('div.gta-browser', list, viewerBox),
         h('div.field', h('label', 'In Sammlung übernehmen'), nameIn),
         h('label.check', keep, ' Original-Texturen mitnehmen (sonst nur das Modell – dann eigene Textur importieren)')),
