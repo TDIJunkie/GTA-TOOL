@@ -166,9 +166,12 @@ window.api.on('setup', (st) => {
 });
 window.api.on('update', (u) => {
   if (u.state === 'available') toast(`Neue Version ${u.version} gefunden – wird im Hintergrund geladen.`, 'info', 6000);
-  if (u.state === 'downloaded') {
+  if (u.state === 'downloaded') showUpdateReady(u.version);
+});
+function showUpdateReady(version) {
+  {
     modal({
-      title: `Update ${u.version} ist bereit`,
+      title: `Update ${version} ist bereit`,
       body: h('div',
         h('p', 'Eine neue Version des GTA Tools wurde heruntergeladen.'),
         h('p.muted', 'Jetzt neu starten installiert das Update sofort. Bei „Später“ wird es beim nächsten Beenden installiert.'),
@@ -180,7 +183,7 @@ window.api.on('update', (u) => {
       ],
     });
   }
-});
+}
 window.api.on('toast', (d) => toast(d.text, d.type || 'ok'));
 window.api.on('app:closing', async () => {
   if (VehicleStudio.dirty || ClothingStudio.dirty || MloStudio.dirty || AnimStudio.dirty || PropStudio.dirty || WeaponStudio.dirty) {
@@ -197,7 +200,20 @@ document.addEventListener('click', (e) => {
   if (sf) Sftp.importTo({ vehicles: VehicleStudio, clothing: ClothingStudio, mlo: MloStudio, anim: AnimStudio, prop: PropStudio, weapon: WeaponStudio }[sf.dataset.sftpOpen], false);
   const act = e.target.closest('[data-action="settings"]');
   if (act) App.openSettings();
+  if (e.target.closest('[data-action="update"]')) checkUpdateNow();
 });
+
+/** Knopf „Update prüfen“ in der Kopfleiste: sucht sofort; fertig geladenes Update kann direkt installiert werden. */
+async function checkUpdateNow() {
+  const u = await call('update:state', null, { quiet: true });
+  if (u && u.downloaded) { showUpdateReady(u.available); return; }
+  const r = await call('update:check', null, { busyText: 'Suche nach Updates …' });
+  if (!r) return;
+  if (!r.ok) toast(r.reason || 'Update-Prüfung nicht möglich.', 'warn');
+  else if (r.downloaded) showUpdateReady(r.version);
+  else if (r.available) toast(`Update ${r.available} gefunden – wird im Hintergrund geladen. Danach kannst du neu starten.`, 'info', 8000);
+  else toast(`Du hast die neueste Version (${u ? u.version : ''}).`);
+}
 
 // Dateien, die nicht auf einer Ablagefläche landen, sollen das Fenster nicht umleiten
 window.addEventListener('dragover', (e) => e.preventDefault());

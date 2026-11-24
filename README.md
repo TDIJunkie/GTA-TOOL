@@ -41,7 +41,7 @@ Das Tool sucht GTA V, Blender und Sollumz beim Start **automatisch** – auch au
 
 ### Automatische Updates
 
-Das Tool sucht bei jedem Start nach einer neuen Version, lädt sie im Hintergrund herunter und fragt dann, ob es neu starten soll. Wählst du „Später“, wird das Update beim nächsten Beenden installiert. In den Einstellungen gibt es zusätzlich den Knopf **„Nach Updates suchen“**.
+Das Tool sucht bei jedem Start nach einer neuen Version, lädt sie im Hintergrund herunter und fragt dann, ob es neu starten soll. Wählst du „Später“, wird das Update beim nächsten Beenden installiert. Zusätzlich gibt es oben in jedem Bereich den Knopf **„⟳ Update prüfen“**.
 
 ### Hinweise
 
@@ -88,7 +88,7 @@ On startup the tool **automatically** looks for GTA V, Blender and Sollumz – a
 
 ### Automatic updates
 
-On every start the tool checks for a new version, downloads it in the background and then asks whether to restart. If you choose “Später” (later), the update is installed the next time you close the tool. There is also a **“Nach Updates suchen”** (check for updates) button in the settings.
+On every start the tool checks for a new version, downloads it in the background and then asks whether to restart. If you choose “Später” (later), the update is installed the next time you close the tool. There is also an **“⟳ Update prüfen”** (check for updates) button at the top of every area.
 
 ### Notes
 

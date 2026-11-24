@@ -1,18 +1,12 @@
 ## Neu in dieser Version / What's new
 
 **🇩🇪**
-- **Neu: Weapon Studio 🔫** – Waffen-Packs öffnen (Addon und Replace), Waffen mit Modellen, Komponenten und Munition in 3D ansehen, Namen im Spiel ändern, Texturen bearbeiten, in Blender bearbeiten und als fertige Resource exportieren (Test-Befehl `/waffe`).
-- **Original-GTA-Waffen als Vorlage**: Waffe suchen (deutsche Namen), in 3D ansehen, laden und eigene Texturen einbauen. Normale und Hochdetail-Texturen (`+hi.ytd`) werden automatisch gemeinsam geändert.
-- **Kleidung**: Die Liste der Original-GTA-Kleidung zeigt jetzt die echten Namen (`jbib_000_u` …) und hat eine Suche. Neu: **Textur per Schieberegler** auf dem Kleidungsstück verschieben und skalieren – mit Live-Vorschau.
-- **Fahrzeuge**: Packs mit mehreren Autos und einem Meta-Ordner je Auto werden jetzt vollständig erkannt (vorher nur ein Auto).
-- **MLO / Kollisionen**: Beim Öffnen in Blender wählbar, was mitgeladen wird (nur die Datei, Umgebung, Modelle, Kollisionen). Flache und verformte Kollisionsboxen bleiben nach dem Export erhalten.
+- **Knopf „⟳ Update prüfen“** oben in jedem Bereich: sucht sofort nach einer neuen Version. Ist ein Update schon geladen, kannst du es direkt mit einem Neustart installieren.
+- Aus 0.4.0: Weapon Studio, Original-GTA-Waffen als Vorlage, Textur verschieben im Clothing Studio, Original-Kleidungsnamen (`jbib_000_u`), mehrere Autos je Pack.
 
 **🇬🇧**
-- **New: Weapon Studio 🔫** – open weapon packs (add-on and replace), view weapons with models, components and ammo in 3D, change in-game names, edit textures, edit in Blender and export as a ready resource (test command `/waffe`).
-- **Original GTA weapons as a template**: search a weapon, view it in 3D, load it and add your own textures. Normal and high-detail textures (`+hi.ytd`) are changed together automatically.
-- **Clothing**: the original GTA clothing list now shows the real names (`jbib_000_u` …) and has a search. New: **move and scale the texture with sliders** on the garment – with live preview.
-- **Vehicles**: packs with several cars and one meta folder per car are now fully detected (previously only one car).
-- **MLO / collisions**: choose what to load when opening in Blender (only the file, surroundings, models, collisions). Flat and reshaped collision boxes are kept after export.
+- **“⟳ Update prüfen” (check for updates) button** at the top of every area: checks for a new version right away. If an update is already downloaded, you can install it immediately with a restart.
+- From 0.4.0: Weapon Studio, original GTA weapons as a template, move textures in the Clothing Studio, original clothing names (`jbib_000_u`), several cars per pack.
 
 ---
 
