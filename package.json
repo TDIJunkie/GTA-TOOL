@@ -1,7 +1,7 @@
 {
   "name": "gta-tool",
   "productName": "GTA Tool",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "GTA Tool – GTA-V-Fahrzeuge, Kleidung, MLOs und Animationen bearbeiten und als FiveM-Resource exportieren",
   "main": "app/main.js",
   "author": "TDIJunkie",

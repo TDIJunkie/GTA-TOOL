@@ -71,10 +71,11 @@
       <div class="dropzone" id="dropzone">
         <div class="drop-icon">⬇</div>
         <h2>Fahrzeug öffnen</h2>
-        <p class="muted">Ziehe einen <b>Ordner</b> oder einzelne <b>Dateien</b> hierher.<br>Das Tool durchsucht alles automatisch – Archive, Modelle, Tuningteile, Texturen und Meta-Dateien.</p>
+        <p class="muted">Ziehe einen <b>Ordner</b> oder einzelne <b>Dateien</b> hierher.<br>Das Tool durchsucht alles automatisch – Archive (.rpf, .zip, .rar, .7z), Modelle, Tuningteile, Texturen und Meta-Dateien.</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-open="folder">📁 Ordner importieren</button>
           <button class="btn big" data-open="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-open="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" data-sftp-open="vehicles">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
@@ -117,10 +118,11 @@
         <div class="drop-icon">👕</div>
         <h2>Kleidung öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> oder einzelne <b>Dateien</b> hierher (FiveM-Kleidung, Addon oder Replace).<br>
-          Das Tool erkennt Modelle (.ydd), Texturen (.ytd), Geschlecht und Sammlung automatisch.</p>
+          Das Tool erkennt Modelle (.ydd), Texturen (.ytd), Geschlecht und Sammlung automatisch – auch gepackt als .zip, .rar oder .7z.</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-copen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-copen="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-copen="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" data-sftp-open="clothing">🌐 Vom Server (SFTP)</button>
           <button class="btn big" id="cs-gta">👕 Aus GTA-Kleidung wählen</button>
         </div>
@@ -160,11 +162,14 @@
       <div class="dropzone" id="mdropzone">
         <div class="drop-icon">🏠</div>
         <h2>Interior (MLO) öffnen</h2>
-        <p class="muted">Ziehe einen <b>Ordner</b> (FiveM-Map-Resource) oder einzelne <b>Dateien</b> hierher.<br>
-          Das Tool erkennt .ytyp, .ymap, Modelle, Texturen und Kollisionen automatisch – auch in dlc.rpf.</p>
+        <p class="muted">Ziehe einen oder mehrere <b>Ordner</b> (FiveM-Map-Resource) oder einzelne <b>Dateien</b> hierher.<br>
+          Das Tool erkennt .ytyp, .ymap, Modelle, Texturen und Kollisionen automatisch – auch in dlc.rpf und gepackt als .zip, .rar oder .7z.<br>
+          Ist ein Interior auf 2 Ordner aufgeteilt (oder willst du 2 MLOs zusammen öffnen): „Mehrere Ordner“.</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-mopen="folder">📁 Ordner importieren</button>
+          <button class="btn big" data-mopen="multi">📁📁 Mehrere Ordner</button>
           <button class="btn big" data-mopen="files">📄 Dateien öffnen</button>
+          <button class="btn big" data-mopen="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" id="ms-new">✨ Neues Interior erstellen</button>
           <button class="btn big" data-sftp-open="mlo">🌐 Vom Server (SFTP)</button>
         </div>
@@ -204,10 +209,11 @@
         <div class="drop-icon">🕺</div>
         <h2>Animationen öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Resource) oder einzelne <b>Dateien</b> hierher.<br>
-          Erkannt werden Animations-Dateien (.ycd), CodeWalker-/Sollumz-XML (.ycd.xml) und Archive (.rpf).</p>
+          Erkannt werden Animations-Dateien (.ycd), CodeWalker-/Sollumz-XML (.ycd.xml) und Archive (.rpf, .zip, .rar, .7z).</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-aopen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-aopen="animfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-aopen="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" data-sftp-open="anim">🌐 Vom Server (SFTP)</button>
         </div>
       </div>
@@ -246,10 +252,11 @@
         <div class="drop-icon">🪑</div>
         <h2>Props öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Prop-Resource) oder einzelne <b>Dateien</b> hierher.<br>
-          Erkannt werden Modelle (.ydr, .yft), Texturen (.ytd), Kollisionen (.ybn), Archetypen (.ytyp) und Archive (.rpf).</p>
+          Erkannt werden Modelle (.ydr, .yft), Texturen (.ytd), Kollisionen (.ybn), Archetypen (.ytyp) und Archive (.rpf, .zip, .rar, .7z).</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-popen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-popen="propfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-popen="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" data-sftp-open="prop">🌐 Vom Server (SFTP)</button>
           <button class="btn big" id="ps-gta">🪑 Aus GTA-Objekt erstellen</button>
           <button class="btn big" id="ps-new">✨ Neu in Blender erstellen</button>
@@ -290,10 +297,11 @@
         <div class="drop-icon">🔫</div>
         <h2>Waffen öffnen</h2>
         <p class="muted">Ziehe einen <b>Ordner</b> (z. B. eine FiveM-Waffen-Resource oder ein Addon mit dlc.rpf) oder einzelne <b>Dateien</b> hierher.<br>
-          Erkannt werden Modelle (.ydr), Texturen (.ytd), Waffen-Metas (weapons.meta, weaponarchetypes.meta …) und Archive (.rpf).</p>
+          Erkannt werden Modelle (.ydr), Texturen (.ytd), Waffen-Metas (weapons.meta, weaponarchetypes.meta …) und Archive (.rpf, .zip, .rar, .7z).</p>
         <div class="row center gap wrap">
           <button class="btn primary big" data-wopen="folder">📁 Ordner importieren</button>
           <button class="btn big" data-wopen="weaponfiles">📄 Dateien öffnen</button>
+          <button class="btn big" data-wopen="archive">🗜 ZIP / RAR öffnen</button>
           <button class="btn big" data-sftp-open="weapon">🌐 Vom Server (SFTP)</button>
           <button class="btn big" id="ws-gta">🔫 Original-GTA-Waffe laden</button>
         </div>

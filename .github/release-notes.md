@@ -1,12 +1,12 @@
 ## Neu in dieser Version / What's new
 
 **🇩🇪**
-- **Knopf „⟳ Update prüfen“** oben in jedem Bereich: sucht sofort nach einer neuen Version. Ist ein Update schon geladen, kannst du es direkt mit einem Neustart installieren.
-- Aus 0.4.0: Weapon Studio, Original-GTA-Waffen als Vorlage, Textur verschieben im Clothing Studio, Original-Kleidungsnamen (`jbib_000_u`), mehrere Autos je Pack.
+- **ZIP, RAR und 7z direkt öffnen** – in jedem Bereich mit dem neuen Knopf „🗜 ZIP / RAR öffnen“, per Drag & Drop oder über „+ Hinzufügen“. Auch mehrteilige RAR (`name.part1.rar`) und Archive innerhalb eines Ordners. Passwortgeschützte Archive bitte vorher selbst entpacken.
+- **MLO Studio: mehrere Ordner laden** – für Interiors, deren Dateien auf mehrere Ordner aufgeteilt sind, oder um mehrere MLOs zusammen zu öffnen („📁📁 Mehrere Ordner“). Beim Export wird alles zu einer Resource.
 
 **🇬🇧**
-- **“⟳ Update prüfen” (check for updates) button** at the top of every area: checks for a new version right away. If an update is already downloaded, you can install it immediately with a restart.
-- From 0.4.0: Weapon Studio, original GTA weapons as a template, move textures in the Clothing Studio, original clothing names (`jbib_000_u`), several cars per pack.
+- **Open ZIP, RAR and 7z directly** – in every studio with the new “🗜 ZIP / RAR öffnen” button, via drag & drop or “+ Hinzufügen”. Multi-part RAR (`name.part1.rar`) and archives inside a folder work too. Please unpack password-protected archives yourself first.
+- **MLO Studio: load several folders** – for interiors whose files are split across several folders, or to open several MLOs together (“📁📁 Mehrere Ordner”). Everything is exported as one resource.
 
 ---
 

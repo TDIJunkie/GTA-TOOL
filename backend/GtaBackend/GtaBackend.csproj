@@ -17,4 +17,8 @@
     <ProjectReference Include="..\..\vendor\CodeWalker\CodeWalker.Core\CodeWalker.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.50.12" />
+  </ItemGroup>
+
 </Project>

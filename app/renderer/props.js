@@ -73,6 +73,7 @@ const PropStudio = (() => {
         { label: '🪑 Aus GTA-Objekt', onClick: () => gtaDialog() },
         { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(PropStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) },
+        { label: '🗜 ZIP / RAR', onClick: () => pickAndOpen('archive', true) },
         { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('propfiles', true) },
       ],
     });

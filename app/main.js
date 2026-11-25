@@ -417,10 +417,11 @@ function registerIpc() {
   handle('dialog:open', async ({ kind }) => {
     const opts = {
       folder: { title: 'Ordner importieren', properties: ['openDirectory', 'multiSelections'] },
-      files: { title: 'Dateien öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Dateien', extensions: ['yft', 'ytd', 'meta', 'xml', 'rpf', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
-      propfiles: { title: 'Props öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Props', extensions: ['ydr', 'yft', 'ytd', 'ytyp', 'ybn', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
-      weaponfiles: { title: 'Waffen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Waffen', extensions: ['ydr', 'ytd', 'meta', 'xml', 'rpf', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
-      animfiles: { title: 'Animationen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Animationen', extensions: ['ycd', 'xml', 'rpf'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      archive: { title: 'ZIP / RAR öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Archive (.zip, .rar, .7z)', extensions: ['zip', 'rar', '7z'] }] },
+      files: { title: 'Dateien öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Dateien', extensions: ['yft', 'ytd', 'meta', 'xml', 'rpf', 'zip', 'rar', '7z', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      propfiles: { title: 'Props öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Props', extensions: ['ydr', 'yft', 'ytd', 'ytyp', 'ybn', 'rpf', 'zip', 'rar', '7z'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      weaponfiles: { title: 'Waffen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Waffen', extensions: ['ydr', 'ytd', 'meta', 'xml', 'rpf', 'zip', 'rar', '7z', 'gxt2'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
+      animfiles: { title: 'Animationen öffnen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Animationen', extensions: ['ycd', 'xml', 'rpf', 'zip', 'rar', '7z'] }, { name: 'Alle Dateien', extensions: ['*'] }] },
       images: { title: 'Bild wählen', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
       image: { title: 'Bild wählen', properties: ['openFile'], filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'tga', 'bmp', 'dds', 'tif', 'tiff'] }] },
       yft: { title: 'Modell wählen', properties: ['openFile'], filters: [{ name: 'GTA-Modell', extensions: ['yft'] }] },
@@ -431,7 +432,7 @@ function registerIpc() {
       exe: { title: 'Programm wählen', properties: ['openFile'], filters: [{ name: 'Programm', extensions: ['exe'] }] },
       gta: { title: 'GTA-V-Ordner wählen (mit GTA5.exe)', properties: ['openDirectory'] },
     }[kind];
-    const importKinds = ['folder', 'files', 'animfiles', 'propfiles', 'weaponfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
+    const importKinds = ['folder', 'archive', 'files', 'animfiles', 'propfiles', 'weaponfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
     const isImport = importKinds.includes(kind);
     const start = isImport ? settings.lastImportDir : kind === 'outdir' ? (settings.lastResourceDir || settings.lastExportDir) : null;
     if (start && fs.existsSync(start)) opts.defaultPath = start;
@@ -450,8 +451,11 @@ function registerIpc() {
   handle('mlo:open', async ({ paths, add }) => {
     rememberImport(paths);
     if (!add || !sessionDir) newSessionDir();
-    await call('session.open', { paths, sessionDir });
-    return call('mlo.analyze', { sessionDir });
+    const opened = await call('session.open', { paths, sessionDir });
+    const m = await call('mlo.analyze', { sessionDir });
+    // z. B. „kommt doppelt vor“, wenn zwei Ordner gleichnamige Dateien haben
+    const extra = ((opened && opened.warnings) || []).filter((w) => !m.warnings.includes(w));
+    return { ...m, warnings: [...extra, ...m.warnings] };
   });
   handle('mlo:analyze', async () => call('mlo.analyze', { sessionDir }));
   handle('mlo:scene', async ({ key }) => call('mlo.scene', { sessionDir, key, propsCache: propsCache() }));

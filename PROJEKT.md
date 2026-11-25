@@ -437,3 +437,20 @@ Backend `Weapons.cs`, Oberfläche `weapons.js`.
       Ersetzen/Löschen wirkt in beiden Dateien, wenn die Textur dort existiert; Hinzufügen in beiden; Bearbeiten im Bildprogramm
       wird nach dem Speichern per `tex:copyTo` in die Partner-Datei übernommen.
       Getestet (CDP): Katalog einlesen, Suche „Pistole“, Vorschau, Laden, Löschen von w_pi_pistol_s in beiden Dateien, copyTo.
+
+### Stand 25.11.2026 – MLO Studio: mehrere Ordner / mehrere MLOs
+- [x] **Aufgeteilte Interiors** (Wunsch Nutzer 25.11.2026): Startfläche „📁📁 Mehrere Ordner“ – Liste sammeln (➕ Ordner
+      hinzufügen, Strg+Klick im Dialog geht auch), dann „Alle laden“. Übersicht: „Geladen (n)“ + „Weiteren Ordner dazuladen“ /
+      „Mehrere Ordner dazuladen“. Hinzufügen bleibt beim aktuellen Interior; kommt ein neues MLO dazu, wird es angezeigt.
+      Nach Hinzufügen wird der 3D-Cache geleert (fehlende Modelle können jetzt aus dem 2. Ordner kommen).
+- [x] `mlo:open` reicht die Warnungen von `session.open` durch (z. B. „kommt doppelt vor“ bei gleichnamigen Dateien) + Toast.
+- Export: alles zusammen in einer Resource (wie bisher, `stream` ist gemeinsam).
+
+### Stand 25.11.2026 (2) – .zip / .rar / .7z öffnen (alle Studios)
+- [x] `Session.Open` entpackt Archive (NuGet **SharpCompress** 0.50.12) in einen Temp-Ordner (`%TEMP%\gtatool_archiv_*`, wird danach gelöscht)
+      und liest ihn wie einen Ordner. Enthält das Archiv nur einen Ordner, wird dieser genommen → Resource-Name bleibt (Export/Original).
+      Auch Archive innerhalb eines geöffneten Ordners. Mehrteilige RAR (`name.part1.rar …`): alle Teile im selben Ordner, nur Teil 1 wird geöffnet.
+      Solide RAR/7z über `ExtractAllEntries`, sonst je Eintrag (0.50 erlaubt den Reader nur bei solide/7z). Schutz vor `../`-Pfaden.
+      Passwort-Archive → verständliche Meldung (nicht unterstützt). Datei-Dialoge + Startflächen-Texte um .zip/.rar/.7z ergänzt.
+- Getestet (Backend direkt, MLO „moreo_cafecute“): zip, 7z, mehrteiliges RAR5, solides RAR, Ordner mit zip, zip+rar zusammen →
+  jeweils 252 Objekte/27 Modelle/3 Kollisionen, Original-Resource erkannt, Dateien byte-gleich, Temp aufgeräumt. Oberfläche nicht per CDP getestet.

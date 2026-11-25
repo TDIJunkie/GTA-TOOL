@@ -25,6 +25,8 @@ Jeder Export ist eine fertige Resource (`fxmanifest.lua`, `stream/`, `data/` …
 
 In jedem Bereich kannst du Dateien und Ordner **direkt von deinem Server laden** („🌐 Vom Server (SFTP)“) und die fertige Resource **direkt auf den Server exportieren** (im Export-Dialog „Server (SFTP)“ wählen). Server legst du unter ⚙ Einstellungen → „SFTP-Server“ an – mit Passwort oder Schlüsseldatei. Zugangsdaten werden verschlüsselt mit Windows gespeichert, der Sicherheitsschlüssel des Servers wird geprüft.
 
+**Gepackte Downloads direkt öffnen:** `.zip`, `.rar` (auch mehrteilig, `name.part1.rar`) und `.7z` lassen sich in jedem Bereich mit „🗜 ZIP / RAR öffnen“ oder per Drag & Drop laden – kein Entpacken nötig.
+
 ### Voraussetzungen
 
 - **Windows 10/11 (64 Bit)**
@@ -71,6 +73,8 @@ Every export is a complete resource (`fxmanifest.lua`, `stream/`, `data/` …) t
 ### 🌐 Work directly with your server (SFTP)
 
 In every studio you can **load files and folders straight from your server** (“🌐 Vom Server (SFTP)”) and **export the finished resource straight to the server** (choose “Server (SFTP)” in the export dialog). Add servers under ⚙ Einstellungen → “SFTP-Server” – with password or key file. Credentials are stored encrypted by Windows and the server’s host key is verified.
+
+**Open packed downloads directly:** `.zip`, `.rar` (also multi-part, `name.part1.rar`) and `.7z` can be loaded in every studio via “🗜 ZIP / RAR öffnen” or drag & drop – no unpacking needed.
 
 ### Requirements
 

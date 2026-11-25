@@ -39,9 +39,117 @@ public static class Session
         var warnings = new List<string>();
         int added = 0;
 
-        foreach (var raw in paths)
+        var temps = new List<string>();
+        try
         {
-            var path = raw.TrimEnd('\\', '/');
+            foreach (var raw in paths)
+                added += OpenOne(raw.TrimEnd('\\', '/'), sessionDir, index, warnings, temps);
+        }
+        finally
+        {
+            foreach (var t in temps) try { Directory.Delete(t, true); } catch { /* Temp-Ordner, egal */ }
+        }
+
+        SaveIndex(sessionDir, index);
+        if (added == 0) warnings.Add("Es wurden keine verwendbaren GTA-Dateien gefunden.");
+        var model = Analyze(sessionDir);
+        return new { added, warnings, model };
+    }
+
+    // ------------------------------------------------------------------ Archive (.zip / .rar / .7z)
+
+    static readonly HashSet<string> ArchiveExt = new(StringComparer.OrdinalIgnoreCase) { ".zip", ".rar", ".7z" };
+
+    public static bool IsArchive(string path) => ArchiveExt.Contains(Path.GetExtension(path));
+
+    static readonly System.Text.RegularExpressions.Regex RarPart = new(@"\.part0*(\d+)\.rar$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>name.part2.rar, name.part3.rar … (nicht Teil 1) – werden zusammen mit Teil 1 gelesen.</summary>
+    static bool IsLaterRarPart(string path) { var m = RarPart.Match(path); return m.Success && m.Groups[1].Value != "1"; }
+
+    /// <summary>Alle Teile eines mehrteiligen RAR (name.part1.rar, name.part2.rar …) in Reihenfolge.</summary>
+    static List<FileInfo> RarVolumes(string first)
+    {
+        var m = RarPart.Match(first);
+        var stem = Path.GetFileName(first)[..^m.Value.Length];
+        return Directory.GetFiles(Path.GetDirectoryName(Path.GetFullPath(first))!, stem + ".part*.rar")
+            .Select(f => (f, mm: RarPart.Match(f)))
+            .Where(x => x.mm.Success && Path.GetFileName(x.f)[..^x.mm.Value.Length].Equals(stem, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => int.Parse(x.mm.Groups[1].Value)).Select(x => new FileInfo(x.f)).ToList();
+    }
+
+    /// <summary>
+    /// Entpackt ein Archiv in einen Temp-Ordner und liefert den Ordner, der wie ein normal geöffneter Ordner gelesen wird.
+    /// Liegt im Archiv nur ein einziger Ordner (meist die Resource), wird direkt dieser verwendet – so bleibt der Resource-Name erhalten.
+    /// </summary>
+    static string ExtractArchive(string archive, List<string> temps)
+    {
+        var name = Path.GetFileNameWithoutExtension(archive);
+        // Mehrteilige RAR (name.part1.rar) → „.part1“ weglassen
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\.part0*1$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var tmp = Path.Combine(Path.GetTempPath(), "gtatool_archiv_" + Guid.NewGuid().ToString("N")[..8]);
+        temps.Add(tmp);
+        var root = Path.Combine(tmp, string.IsNullOrWhiteSpace(name) ? "archiv" : name);
+        Directory.CreateDirectory(root);
+        var rootFull = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        Program.Progress($"{Path.GetFileName(archive)} wird entpackt …");
+        try
+        {
+            using var arc = RarPart.IsMatch(archive)
+                ? SharpCompress.Archives.ArchiveFactory.OpenArchive(RarVolumes(archive))
+                : SharpCompress.Archives.ArchiveFactory.OpenArchive(new FileInfo(archive));
+            if (arc.Entries.Any(e => !e.IsDirectory && e.IsEncrypted))
+                throw new UserError($"{Path.GetFileName(archive)} ist mit einem Passwort geschützt. Bitte zuerst selbst entpacken und dann den Ordner öffnen.");
+            int n = 0;
+            void Write(SharpCompress.Common.IEntry e, Func<Stream> open)
+            {
+                if (e.IsDirectory || string.IsNullOrEmpty(e.Key)) return;
+                var target = Path.GetFullPath(Path.Combine(root, e.Key.Replace('\\', '/').TrimStart('/')));
+                if (!target.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) return; // Schutz vor „../“-Pfaden
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                using (var src = open())
+                using (var dst = File.Create(target)) src.CopyTo(dst);
+                if (++n % 50 == 0) Program.Progress($"{Path.GetFileName(archive)} wird entpackt ({n} Dateien) …");
+            }
+            if (arc.IsSolid || arc.Type == SharpCompress.Common.ArchiveType.SevenZip)
+            {
+                // solide Archive / 7z nur am Stück lesbar
+                using var reader = arc.ExtractAllEntries();
+                while (reader.MoveToNextEntry()) Write(reader.Entry, reader.OpenEntryStream);
+            }
+            else
+                foreach (var e in arc.Entries) Write(e, e.OpenEntryStream);
+        }
+        catch (UserError) { throw; }
+        catch (Exception ex) when (ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("encrypted", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UserError($"{Path.GetFileName(archive)} ist mit einem Passwort geschützt. Bitte zuerst selbst entpacken und dann den Ordner öffnen.");
+        }
+        catch (Exception ex)
+        {
+            throw new UserError($"{Path.GetFileName(archive)} konnte nicht entpackt werden ({ex.Message}). Ist das Archiv vollständig? Bei mehrteiligen RAR-Archiven müssen alle Teile im selben Ordner liegen.");
+        }
+        // nur ein Unterordner und keine Dateien daneben → diesen nehmen (z. B. archiv.zip/meine_resource/…)
+        var dir = root;
+        while (Directory.GetFiles(dir).Length == 0 && Directory.GetDirectories(dir) is { Length: 1 } only
+               && !only[0].EndsWith("stream", StringComparison.OrdinalIgnoreCase)) dir = only[0];
+        return dir;
+    }
+
+    static int OpenOne(string path, string sessionDir, List<IndexEntry> index, List<string> warnings, List<string> temps)
+    {
+        int added = 0;
+        {
+            if (File.Exists(path) && IsArchive(path))
+            {
+                var dir = ExtractArchive(path, temps);
+                if (!Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any())
+                {
+                    warnings.Add($"{Path.GetFileName(path)} ist leer.");
+                    return 0;
+                }
+                return OpenOne(dir, sessionDir, index, warnings, temps);
+            }
             if (Directory.Exists(path))
             {
                 var src = SafeName(Path.GetFileName(path));
@@ -54,6 +162,13 @@ public static class Session
                     {
                         if (IsGtaRpf(f)) added += OpenRpf(f, sessionDir, SafeName(RpfSourceName(f, path)), index, warnings);
                         else warnings.Add(ForeignRpfText(f));
+                    }
+                    else if (IsArchive(f))
+                    {
+                        if (IsLaterRarPart(f)) continue;
+                        // Archiv im Ordner (z. B. Download mit mehreren gepackten Teilen) → mit entpacken
+                        try { added += OpenOne(f, sessionDir, index, warnings, temps); }
+                        catch (UserError ex) { warnings.Add(ex.Message); }
                     }
                     else
                         added += Take(Path.GetFileName(f), () => File.ReadAllBytes(f), $"{Path.GetFileName(path)}/{rel.Replace('\\', '/')}", src, sessionDir, index, warnings);
@@ -71,11 +186,7 @@ public static class Session
             }
             else warnings.Add($"Nicht gefunden: {path}");
         }
-
-        SaveIndex(sessionDir, index);
-        if (added == 0) warnings.Add("Es wurden keine verwendbaren GTA-Dateien gefunden.");
-        var model = Analyze(sessionDir);
-        return new { added, warnings, model };
+        return added;
     }
 
     // ------------------------------------------------------------------ Original-Resource erhalten
@@ -95,7 +206,7 @@ public static class Session
             if (Directory.EnumerateFiles(path, "*.rpf", SearchOption.AllDirectories).Any(IsGtaRpf)) return;
             foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
-                if (StreamExt.Contains(Path.GetExtension(f)) || (f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase) && IsGtaRpf(f))) continue;
+                if (StreamExt.Contains(Path.GetExtension(f)) || IsArchive(f) || (f.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase) && IsGtaRpf(f))) continue;
                 var rel = Path.GetRelativePath(path, f);
                 if (rel.Split('\\', '/').Any(p => p.Equals(".git", StringComparison.OrdinalIgnoreCase) || p.Equals("node_modules", StringComparison.OrdinalIgnoreCase))) continue;
                 var target = Path.Combine(root, rel);

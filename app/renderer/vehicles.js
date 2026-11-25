@@ -72,6 +72,7 @@ const VehicleStudio = (() => {
       buttons: [
         { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(VehicleStudio, true) },
         { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) },
+        { label: '🗜 ZIP / RAR', onClick: () => pickAndOpen('archive', true) },
         { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('files', true) },
       ],
     });

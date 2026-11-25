@@ -25,12 +25,17 @@ const MloStudio = (() => {
   // ================================================================ Grundgerüst
 
   function init() {
-    document.querySelectorAll('[data-mopen]').forEach((b) => b.addEventListener('click', () => pickAndOpen(b.dataset.mopen, false)));
+    document.querySelectorAll('[data-mopen]').forEach((b) => b.addEventListener('click', () => (b.dataset.mopen === 'multi' ? multiFolderDialog(false) : pickAndOpen(b.dataset.mopen, false))));
     $('ms-add').addEventListener('click', () => modal({
-      title: 'Weitere Dateien hinzufügen', body: h('p.muted', 'Dateien kommen zum geöffneten Interior dazu (z. B. eigene Props).'),
+      title: 'Weitere Dateien hinzufügen',
+      body: h('div',
+        h('p.muted', 'Alles kommt zum bereits Geöffneten dazu: z. B. der zweite Ordner eines aufgeteilten Interiors, ein weiteres MLO oder eigene Props.'),
+        h('p.muted.small', 'Beim Export landet alles zusammen in einer Resource.')),
       buttons: [{ label: '✨ Neues Interior', onClick: () => newMloDialog() },
         { label: '🌐 Vom Server (SFTP)', onClick: () => Sftp.importTo(MloStudio, true) },
-        { label: '📁 Ordner importieren', onClick: () => pickAndOpen('folder', true) }, { label: '📄 Dateien öffnen', primary: true, onClick: () => pickAndOpen('files', true) }],
+        { label: '🗜 ZIP / RAR', onClick: () => pickAndOpen('archive', true) },
+        { label: '📄 Dateien öffnen', onClick: () => pickAndOpen('files', true) },
+        { label: '📁 Ordner hinzufügen', primary: true, onClick: () => pickAndOpen('folder', true) }],
     }));
     $('ms-new').addEventListener('click', () => newMloDialog());
     $('ms-close').addEventListener('click', closeAll);
@@ -78,14 +83,68 @@ const MloStudio = (() => {
     if (paths && paths.length) await open(paths, add);
   }
 
+  /** Mehrere Ordner auf einmal (z. B. ein MLO, dessen Dateien auf 2 Ordner aufgeteilt sind, oder 2 MLOs). */
+  function multiFolderDialog(add) {
+    const chosen = [];
+    const list = h('div.list', { style: { minHeight: '60px', marginTop: '8px' } });
+    const draw = () => {
+      list.innerHTML = '';
+      if (!chosen.length) { list.append(h('p.muted', { style: { padding: '10px' } }, 'Noch kein Ordner gewählt.')); return; }
+      chosen.forEach((p, i) => list.append(h('div.list-row',
+        h('span', '📁'), h('div.grow', h('div.name', base(p)), h('div.muted.small', p)),
+        h('button.btn.small.ghost', { title: 'Entfernen', onclick: () => { chosen.splice(i, 1); draw(); } }, '✕'))));
+    };
+    draw();
+    modal({
+      title: '📁📁 Mehrere Ordner laden',
+      body: h('div',
+        h('p.muted', 'Für Interiors, deren Dateien auf mehrere Ordner aufgeteilt sind (z. B. „mlo_teil1“ und „mlo_teil2“), oder um mehrere MLOs zusammen zu öffnen. Alles wird zusammengeführt und beim Export zu einer Resource.'),
+        h('button.btn', {
+          onclick: async () => {
+            const p = await call('dialog:open', { kind: 'folder' });
+            for (const x of p || []) if (!chosen.some((c) => c.toLowerCase() === x.toLowerCase())) chosen.push(x);
+            draw();
+          },
+        }, '➕ Ordner hinzufügen …'),
+        list,
+        h('p.muted.small', { style: { marginTop: '8px' } }, 'Tipp: Im Ordner-Fenster kannst du mit Strg+Klick auch mehrere Ordner auf einmal markieren.')),
+      buttons: [
+        { label: 'Abbrechen' },
+        {
+          label: 'Alle laden', primary: true,
+          onClick: async () => {
+            if (!chosen.length) { toast('Bitte mindestens einen Ordner hinzufügen.', 'warn'); return true; }
+            await open(chosen.slice(), add);
+            return false;
+          },
+        },
+      ],
+    });
+  }
+
   async function open(paths, add) {
     if (!add && S.model && S.dirty && !await UI.confirm('Neu öffnen?', 'Nicht exportierte Änderungen gehen verloren. Fortfahren?', 'Öffnen', { danger: true })) return;
-    const m = await call('mlo:open', { paths, add }, { busyText: 'Interior wird gelesen …' });
+    const before = add && S.model ? S.model.mlos.length : 0;
+    const m = await call('mlo:open', { paths, add }, { busyText: paths.length > 1 ? `${paths.length} Ordner/Dateien werden gelesen …` : 'Interior wird gelesen …' });
     if (!m) return;
     S.model = m;
-    if (!add) { S.dirty = false; S.version = {}; glbCache.clear(); S.texCache = {}; S.scene = null; S.entityId = null; }
+    if (!add) { S.dirty = false; S.version = {}; glbCache.clear(); S.texCache = {}; S.scene = null; S.entityId = null; S.sources = []; }
+    else { glbCache.clear(); S.texCache = {}; S.scene = null; S.entityId = null; } // neue Dateien können fehlende Modelle/Texturen liefern
+    S.sources = [...(S.sources || []), ...paths];
+    const dup = m.warnings.filter((w) => w.includes('doppelt'));
+    if (dup.length) toast(dup.length === 1 ? dup[0] : `${dup.length} Dateien kommen in mehreren Ordnern vor – jeweils die zuletzt geladene wird verwendet (Details in der Übersicht).`, 'warn', 10000);
     if (!m.mlos.length) toast('Kein Interior (MLO) gefunden – Modelle, Texturen und Kollisionen lassen sich trotzdem bearbeiten.', 'warn', 8000);
-    S.mloKey = m.mlos[0] ? m.mlos[0].key : null;
+    // beim Hinzufügen beim aktuellen Interior bleiben (außer es kam ein neues dazu → das neue zeigen)
+    const keep = add && m.mlos.find((x) => x.key === S.mloKey);
+    if (add && m.mlos.length > before && before > 0) {
+      const fresh = m.mlos.find((x) => !S.knownMlos || !S.knownMlos.includes(x.key));
+      S.mloKey = (fresh || keep || m.mlos[0]).key;
+      toast(`✓ Jetzt ${m.mlos.length} Interiors geladen – links in der Liste umschalten.`, 'ok', 7000);
+    } else if (keep) {
+      S.mloKey = keep.key;
+      toast(`✓ ${paths.length > 1 ? `${paths.length} Ordner` : base(paths[0])} hinzugefügt.`);
+    } else S.mloKey = m.mlos[0] ? m.mlos[0].key : null;
+    S.knownMlos = m.mlos.map((x) => x.key);
     S.sel = S.mloKey ? { type: 'mlo' } : { type: 'overview' };
     await ensureCatalog();
     renderAll();
@@ -106,7 +165,7 @@ const MloStudio = (() => {
   async function closeAll() {
     if (S.dirty && !await UI.confirm('Schließen?', 'Nicht exportierte Änderungen gehen verloren. Wirklich schließen?', 'Schließen', { danger: true })) return;
     await call('session:close');
-    Object.assign(S, { model: null, sel: { type: 'overview' }, mloKey: null, scene: null, entityId: null, dirty: false });
+    Object.assign(S, { model: null, sel: { type: 'overview' }, mloKey: null, scene: null, entityId: null, dirty: false, sources: [], knownMlos: null });
     if (window.Viewer3D) window.Viewer3D.sceneClear();
     renderAll();
   }
@@ -199,9 +258,13 @@ const MloStudio = (() => {
       h('div.cards',
         card('Interiors', m.mlos.length), card('Modelle', m.models.length), card('Texturdateien', m.ytds.length),
         card('Kollisionen', m.collisions.length), card('YMAPs', m.ymaps.length), card('YTYPs', m.ytyps.length)),
+      (S.sources || []).length ? h('div.section', h('div.section-head', h('h3', `Geladen (${S.sources.length})`)),
+        h('div.list', S.sources.map((p) => h('div.list-row', h('span', /\.[a-z0-9]{2,5}$/i.test(p) ? '📄' : '📁'), h('div.grow', h('div.name', base(p)), h('div.muted.small', p)))))) : null,
       h('div.actions',
+        action('📁', 'Weiteren Ordner dazuladen', 'Zweiter Teil eines aufgeteilten Interiors oder ein weiteres MLO', () => pickAndOpen('folder', true)),
+        action('📁📁', 'Mehrere Ordner dazuladen', 'Mehrere Ordner auswählen und zusammen laden', () => multiFolderDialog(true)),
         action('✨', 'Neues Interior erstellen', 'Auf der Karte platzieren und in Blender bauen', () => newMloDialog()),
-        action('📦', 'Als FiveM-Resource exportieren', 'Fertige Map-Resource (this_is_a_map)', exportDialog)));
+        action('📦', 'Als FiveM-Resource exportieren', 'Fertige Map-Resource (this_is_a_map) – alle geladenen Ordner zusammen', exportDialog)));
   }
   const card = (k, v) => h('div.card', h('div.k', k), h('div.v', String(v)));
 
