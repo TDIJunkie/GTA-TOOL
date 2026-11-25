@@ -4,12 +4,12 @@ using CodeWalker.Utils;
 
 namespace GtaBackend;
 
-/// <summary>Texturen in .ytd sowie eingebettete Texturen in .yft/.ydr lesen, exportieren, ersetzen, hinzufÃ¼gen.</summary>
+/// <summary>Texturen in .ytd sowie eingebettete Texturen in .yft/.ydr lesen, exportieren, ersetzen, hinzufügen.</summary>
 public static class Textures
 {
     // ------------------------------------------------------------- Container laden/speichern
 
-    /// <summary>HÃ¤lt eine geladene Datei mit TexturwÃ¶rterbuch.</summary>
+    /// <summary>Hält eine geladene Datei mit Texturwörterbuch.</summary>
     internal class Container
     {
         public string File;
@@ -33,7 +33,7 @@ public static class Textures
         if (!File.Exists(file)) throw new UserError($"Datei nicht gefunden: {Path.GetFileName(file)}");
         var data = File.ReadAllBytes(file);
         if (data.Length < 4 || data[0] != 'R' || data[1] != 'S' || data[2] != 'C' || data[3] != '7')
-            throw new UserError($"{Path.GetFileName(file)} ist verschlÃ¼sselt oder keine GTA-Ressource.");
+            throw new UserError($"{Path.GetFileName(file)} ist verschlüsselt oder keine GTA-Ressource.");
         var c = new Container { File = file };
         var ext = Path.GetExtension(file).ToLowerInvariant();
         switch (ext)
@@ -41,7 +41,7 @@ public static class Textures
             case ".ytd":
                 c.Ytd = new YtdFile();
                 c.Ytd.Load(data);
-                c.Dict = c.Ytd.TextureDict ?? throw new UserError("Die YTD enthÃ¤lt kein TexturwÃ¶rterbuch.");
+                c.Dict = c.Ytd.TextureDict ?? throw new UserError("Die YTD enthält kein Texturwörterbuch.");
                 break;
             case ".yft":
                 c.Yft = new YftFile();
@@ -65,7 +65,7 @@ public static class Textures
         }
         if (c.Dict == null && createEmbedded)
         {
-            throw new UserError("Dieses Modell hat keine eingebetteten Texturen. Neue Texturen bitte in die zugehÃ¶rige .ytd importieren.");
+            throw new UserError("Dieses Modell hat keine eingebetteten Texturen. Neue Texturen bitte in die zugehörige .ytd importieren.");
         }
         return c;
     }
@@ -135,7 +135,7 @@ public static class Textures
             return "data:image/png;base64," + Convert.ToBase64String(Png.EncodeBgra(px, w, h));
         }
 
-        // Fallback (z. B. BC7): Ã¼ber texconv
+        // Fallback (z. B. BC7): über texconv
         var tmp = TempDir();
         try
         {
@@ -186,7 +186,7 @@ public static class Textures
         int i = 0;
         foreach (var t in list)
         {
-            Program.Progress($"Exportiere {t.Name} â€¦", (int)(100.0 * i++ / Math.Max(1, list.Count)));
+            Program.Progress($"Exportiere {t.Name} …", (int)(100.0 * i++ / Math.Max(1, list.Count)));
             var dds = DDSIO.GetDDSFile(t);
             var baseName = Safe(t.Name);
             if (format == "dds")
@@ -211,7 +211,7 @@ public static class Textures
         return new { files = written, warnings };
     }
 
-    // ------------------------------------------------------------- Ersetzen / HinzufÃ¼gen / Entfernen
+    // ------------------------------------------------------------- Ersetzen / Hinzufügen / Entfernen
 
     public static object Replace(string file, string name, string image, string backupDir)
     {
@@ -372,7 +372,7 @@ public static class Textures
                 var outDir = Path.Combine(tmp, "out");
                 Directory.CreateDirectory(outDir);
                 bool bc = fmt.StartsWith("BC");
-                // 1. Durchgang: GrÃ¶ÃŸe bestimmen
+                // 1. Durchgang: Größe bestimmen
                 var args1 = new List<string> { "-f", fmt, "-m", "1", "-y", "-o", outDir };
                 if (bc) args1.Add("-pow2");
                 args1.AddRange(new[] { "--", src });
@@ -381,7 +381,7 @@ public static class Textures
                 if (!File.Exists(first)) throw new UserError("Das Bild konnte nicht umgewandelt werden.");
                 var hdr = File.ReadAllBytes(first);
                 int h = BitConverter.ToInt32(hdr, 12), w = BitConverter.ToInt32(hdr, 16);
-                // Mipmaps bis 4Ã—4 (wie GTA)
+                // Mipmaps bis 4×4 (wie GTA)
                 int mips = 1;
                 while (Math.Min(w >> mips, h >> mips) >= 4) mips++;
                 if (mips > 1)

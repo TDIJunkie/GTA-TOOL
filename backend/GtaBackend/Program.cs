@@ -74,6 +74,11 @@ public static class Program
         "blender.prepare" => BlenderBridge.Prepare(p.Str("sessionDir"), p.Str("model"), p.StrList("ytds")),
         "blender.apply" => BlenderBridge.Apply(p.Str("sessionDir"), p.Str("exportDir"), p.Str("model"), p.Str("backupDir")),
         "debug.yft" => DebugInfo.Yft(p.Str("file")),
+        "vehicle.modelEquip" => Emergency.ModelInfo(p.Str("file")),
+        "vehicle.equipInfo" => Emergency.Info(p.Str("sessionDir"), p.Str("model")),
+        "vehicle.sirenMarkers" => Emergency.Markers(p.Str("sessionDir"), p.Str("model"), p.Str("colors"), p.Str("outDir")),
+        "vehicle.equipApply" => Emergency.Apply(p.Str("sessionDir"), p.Str("model"),
+            System.Text.Json.JsonSerializer.Deserialize<Emergency.Settings>(p["settings"]?.ToJsonString() ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }), p.Str("backupDir")),
         "debug.ymt" => Ymt.Roundtrip(p.Str("file"), p.Str("outXml")),
         "debug.extract" => DebugInfo.ExtractFromRpf(p.Str("rpf"), p.Str("entry"), p.Str("out")),
         "debug.hashes" => DebugInfo.FindHashes(p.Str("gtaPath"), p.StrList("hashes")),
@@ -132,6 +137,7 @@ public static class Program
         "props.status" => Props.Status(p.Str("cacheFile")),
         "props.build" => Props.Build(p.Str("gtaPath"), p.Str("cacheFile")),
         "props.search" => Props.Search(p.Str("cacheFile"), p.Str("term"), p.Int("max", 200)),
+        "props.extract" => PropsExtract(p.Str("gtaPath"), p.Str("cacheFile"), p.Str("name"), p.Str("cacheDir")),
         "mlo.analyze" => Mlo.Analyze(p.Str("sessionDir")),
         "mlo.scene" => Mlo.Scene(p.Str("sessionDir"), p.Str("key"), p.Str("propsCache")),
         "mlo.archGlb" => Mlo.ArchetypeGlb(p.Str("sessionDir"), p.Str("name"), p.Str("gtaPath"), p.Str("propsCache"), p.Str("propsDir"), p.Str("outFile")),
@@ -198,6 +204,13 @@ public static class Program
     public static void Log(string text)
     {
         try { Console.Error.WriteLine(text); } catch { }
+    }
+
+    static object PropsExtract(string gtaPath, string cacheFile, string name, string cacheDir)
+    {
+        var (model, ytds) = Props.Extract(gtaPath, cacheFile, name, cacheDir);
+        if (model == null) throw new UserError($"GTA-Objekt „{name}“ nicht gefunden.");
+        return new { model, ytds };
     }
 
     // ---- kleine Helfer für Parameter ----

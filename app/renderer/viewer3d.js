@@ -381,6 +381,7 @@ function hookPicking() {
     for (const h of hits) {
       let o = h.object;
       while (o && o.userData.entityId === undefined) o = o.parent;
+      if (o && o.userData.locked) continue;   // z. B. das Fahrzeug beim Teile-Platzieren
       if (o && o.visible) { sceneSelect(o.userData.entityId); if (onPick) onPick(o.userData.entityId); return; }
     }
   });
@@ -424,6 +425,7 @@ async function sceneLoad(items, entities, { keepCamera = false } = {}) {
     const t = templates.get(e.name) || placeholder();
     const o = t.clone(true);
     o.userData.entityId = e.id;
+    o.userData.locked = !!e.locked;
     applyTransform(o, e);
     sceneRoot.add(o);
   }

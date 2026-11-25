@@ -4,7 +4,7 @@ using CodeWalker.Utils;
 namespace GtaBackend;
 
 /// <summary>
-/// Bereitet Modelle fÃ¼r Blender/Sollumz vor und Ã¼bernimmt das Ergebnis zurÃ¼ck in die Sitzung.
+/// Bereitet Modelle für Blender/Sollumz vor und übernimmt das Ergebnis zurück in die Sitzung.
 /// Sollumz sucht externe Texturen als DDS im Ordner &lt;modellordner&gt;/&lt;modellname&gt;/.
 /// </summary>
 public static class BlenderBridge
@@ -16,7 +16,7 @@ public static class BlenderBridge
         var src = Path.Combine(stream, model + ".yft");
         if (!File.Exists(src)) throw new UserError($"{model}.yft wurde nicht gefunden.");
         if (Session.IsEncrypted(sessionDir, $"stream/{model}.yft"))
-            throw new UserError($"{model}.yft ist verschlÃ¼sselt (FiveM-Escrow) und kann nicht bearbeitet werden.");
+            throw new UserError($"{model}.yft ist verschlüsselt (FiveM-Escrow) und kann nicht bearbeitet werden.");
 
         var work = Path.Combine(sessionDir, "blender", model);
         Textures.TryDelete(work);
@@ -37,7 +37,7 @@ public static class BlenderBridge
         {
             var f = Path.Combine(sessionDir, rel);
             if (!File.Exists(f) || Session.IsEncrypted(sessionDir, rel)) continue;
-            Program.Progress($"Texturen aus {Path.GetFileName(f)} werden fÃ¼r Blender bereitgestellt â€¦");
+            Program.Progress($"Texturen aus {Path.GetFileName(f)} werden für Blender bereitgestellt …");
             try
             {
                 var ytd = new YtdFile();
@@ -125,23 +125,51 @@ public static class BlenderBridge
             var names = string.Join(", ", files.Select(Path.GetFileName));
             throw new UserError(files.Length == 0
                 ? "Blender hat keine .yft exportiert."
-                : $"Blender hat {names} exportiert, erwartet wurde {model}.yft. Bitte das Fragment in Blender wieder â€ž{model}â€œ nennen.");
+                : $"Blender hat {names} exportiert, erwartet wurde {model}.yft. Bitte das Fragment in Blender wieder „{model}“ nennen.");
         }
         var wanted = new[] { model + ".yft", model + "_hi.yft" };
         var applied = new List<string>();
+        var warnings = new List<string>();
         foreach (var f in files.Where(f => wanted.Contains(Path.GetFileName(f).ToLowerInvariant())))
         {
             var head = new byte[4];
             using (var fs = File.OpenRead(f)) fs.Read(head, 0, 4);
             if (head[0] != 'R' || head[1] != 'S' || head[2] != 'C' || head[3] != '7')
-                throw new UserError($"{Path.GetFileName(f)} aus Blender ist ungÃ¼ltig (keine RSC7-Signatur).");
+                throw new UserError($"{Path.GetFileName(f)} aus Blender ist ungültig (keine RSC7-Signatur).");
             var target = Path.Combine(sessionDir, "stream", Path.GetFileName(f).ToLowerInvariant());
             Session.Backup(target, backupDir);
             File.Copy(f, target, true);
             applied.Add(Path.GetFileName(target));
         }
+        // Neue Teile aus Blender (z. B. ein neues Extra): Bilder aus „texturen“ in die .ytd des Fahrzeugs
+        var texDir = Path.Combine(exportDir, "texturen");
+        if (Directory.Exists(texDir))
+        {
+            var images = Directory.GetFiles(texDir).Where(f => new[] { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".dds" }.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
+            if (images.Count > 0)
+            {
+                var ytd = Path.Combine(sessionDir, "stream", model + ".ytd");
+                if (!File.Exists(ytd))
+                {
+                    var empty = new YtdFile { TextureDict = new TextureDictionary() };
+                    empty.TextureDict.BuildFromTextureList(new List<Texture>());
+                    File.WriteAllBytes(ytd, empty.Save());
+                }
+                // Texturen, die das Fahrzeug schon hat, nicht überschreiben (Teile benutzen oft Texturen des Autos)
+                try
+                {
+                    var have = new HashSet<string>(Textures.TexList(Textures.Open(ytd)).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+                    images = images.Where(i => !have.Contains(Textures.Safe(Path.GetFileNameWithoutExtension(i)))).ToList();
+                }
+                catch { }
+                if (images.Count > 0)
+                try { Textures.Add(ytd, images, backupDir); applied.Add(Path.GetFileName(ytd)); }
+                catch (Exception ex) { warnings.Add($"Texturen des neuen Teils konnten nicht übernommen werden: {ex.Message}"); }
+            }
+            try { Directory.Delete(texDir, true); } catch { }
+        }
         // Export-Ordner leeren, damit ein zweiter Durchlauf eindeutig ist
         foreach (var f in files) { try { File.Delete(f); } catch { } }
-        return new { applied };
+        return new { applied, warnings };
     }
 }

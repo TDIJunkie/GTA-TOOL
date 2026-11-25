@@ -78,7 +78,7 @@ public static class VehicleConvert
         return renamed;
     }
 
-    static void SetVal(XElement item, string name, string value, string after = null)
+    internal static void SetVal(XElement item, string name, string value, string after = null)
     {
         var el = item.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (el == null)
@@ -91,13 +91,13 @@ public static class VehicleConvert
         el.Value = value;
     }
 
-    static string GetVal(XElement item, string name)
+    internal static string GetVal(XElement item, string name)
     {
         var el = item.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
         return el == null ? null : (el.Attribute("value")?.Value ?? el.Value)?.Trim();
     }
 
-    static void SaveXml(XDocument doc, string file)
+    internal static void SaveXml(XDocument doc, string file)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         var settings = new XmlWriterSettings { Indent = true, IndentChars = "  ", Encoding = new UTF8Encoding(false) };

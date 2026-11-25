@@ -13,6 +13,10 @@ const VehicleStudio = (() => {
     dirty: false,
     paint: '#9ea3aa',
     mounted: {},          // Fahrzeug -> { Kategorie: Teilname }  (nur Vorschau)
+    equip: {},            // Fahrzeug -> Blaulicht/Extras-Info aus dem Backend
+    equipForm: {},        // Fahrzeug -> Formularstand (noch nicht übernommen)
+    hiddenExtras: {},     // Fahrzeug -> Set der in der Vorschau ausgeblendeten Extras
+    place: {},            // Fahrzeug -> { parts: [{ id, file, name, ytds, pos, rot, always }], sel, mode }  (Teile platzieren)
   };
 
   // 3D-Vorschau: Cache je Datei, wird bei jeder Änderung geleert
@@ -180,6 +184,10 @@ const VehicleStudio = (() => {
           sub.append(h('div.tree-label', `Felgen (${wheels.length})`));
           for (const p of wheels) sub.append(item('⭕', p.name, { type: 'model', vehicle: v.model, file: p.file }, { lock: p.encrypted }));
         }
+        if (v.file && !v.encrypted) {
+          sub.append(h('div.tree-label', 'Einsatzfahrzeug'));
+          sub.append(item('🚨', 'Blaulicht & Extras', { type: 'equip', vehicle: v.model, file: 'equip:' + v.model }));
+        }
         sub.append(h('div.tree-label', 'Sound'));
         sub.append(item('🔊', `Motorsound${S.model.audioFiles ? '' : ' (Standard)'}`, { type: 'sound', vehicle: v.model, file: `sound:${v.model}` }));
         if (v.file && !v.encrypted) {
@@ -236,11 +244,13 @@ const VehicleStudio = (() => {
     else if (s.type === 'ytd') c.append(await viewYtd(s.file, flashName));
     else if (s.type === 'meta') c.append(viewMeta());
     else if (s.type === 'livery') c.append(await viewLivery(vehicleOf(s.vehicle)));
+    else if (s.type === 'equip') c.append(await viewEquip(vehicleOf(s.vehicle)));
     else if (s.type === 'sound') c.append(await viewSound(s.vehicle ? vehicleOf(s.vehicle) : null));
     else c.append(viewOther(s.file));
     if (keepScroll) c.scrollTop = scroll;
     const vEl = c.querySelector('.viewer');
-    if (vEl) attachViewer(vEl);
+    if (vEl && vEl._spec) attachViewer(vEl);
+    else if (vEl && vEl._scene) vEl._scene(vEl);
   }
 
   function warningsBox(list) {
@@ -302,6 +312,7 @@ const VehicleStudio = (() => {
           : action('✏', 'Namen ändern', 'Spawn-Name, Anzeigename, Marke', () => renameDialog(v)),
         action('🧊', 'Karosserie in Blender bearbeiten', 'Öffnet das Modell mit Sollumz', () => blender(v.model, v.ytds), !v.file || v.encrypted || bState === 'open'),
         action('🎨', 'Texturen bearbeiten', v.ytds.length ? base(v.ytds[0]) : 'keine Texturdatei', () => select({ type: 'ytd', vehicle: v.model, file: v.ytds[0] }), !v.ytds.length),
+        action('🚨', 'Blaulicht & Extras', 'Polizei, Rettung, Feuerwehr · Extras an/aus', () => select({ type: 'equip', vehicle: v.model, file: 'equip:' + v.model }), !v.file || v.encrypted),
         action('📦', 'Als FiveM-Resource exportieren', 'Fertiges Script für deinen Server', exportDialog)),
       h('div.cards',
         card('Spawn-Name', v.model), card('Marke', v.make), card('Handling', v.handlingId),
@@ -973,8 +984,13 @@ const VehicleStudio = (() => {
       await V.load(m.glb, { keepCamera, ghost: !!spec.ghost });
       if (o) await V.loadOverlay(o.glb, { keepCamera }); else V.clearOverlay();
       const ex = spec.extras && spec.extras.length ? await Promise.all(spec.extras.map(getGlb)) : [];
+      const glbs = ex.map((x) => x.glb);
+      if (spec.markers) {
+        const r = await window.api.invoke('vehicle:sirenMarkers', spec.markers);
+        if (r.ok) glbs.push(...r.data.glbs);
+      }
       if (token !== preview.token) return;
-      await V.setExtras(ex.map((x) => x.glb));
+      await V.setExtras(glbs);
       preview.lastKey = key;
       const info = o || m;
       const missing = (m.missingTextures || 0) + (o ? o.missingTextures || 0 : 0);
@@ -987,6 +1003,403 @@ const VehicleStudio = (() => {
       el._status.textContent = `3D-Ansicht nicht möglich: ${e.message}`;
       el._status.classList.add('err');
     }
+  }
+
+  // ---------------------------------------------------------------- Blaulicht & Extras (Einsatzfahrzeuge)
+
+  const KINDS = [
+    ['civil', '🚗 Zivilfahrzeug (kein Einsatzfahrzeug)'], ['police', '🚓 Polizei'], ['sheriff', '⭐ Sheriff'],
+    ['ambulance', '🚑 Rettungsdienst / Krankenwagen'], ['fire', '🚒 Feuerwehr'], ['utility', '🚧 Abschlepp / Pannenhilfe / Bau'],
+  ];
+  const COLORS = [
+    ['blue', 'Blau'], ['blue_white', 'Blau / Weiß'], ['blue_red', 'Rot / Blau (USA)'], ['red', 'Rot'],
+    ['red_white', 'Rot / Weiß'], ['amber', 'Gelb (Warnlicht)'], ['amber_white', 'Gelb / Weiß'],
+  ];
+  const PATTERNS = [
+    ['double', 'Doppelblitz (wie LED-Balken)'], ['alternate', 'Wechselblinker (links / rechts)'],
+    ['together', 'Alle gleichzeitig'], ['rotate', 'Rundumlicht (drehend)'],
+  ];
+  const SOUNDS = [
+    ['keep', 'Nicht ändern'], ['POLICE', 'Polizei'], ['POLICE3', 'Polizei (Interceptor)'], ['SHERIFF', 'Sheriff'],
+    ['FBI', 'FBI / Zivilstreife'], ['AMBULANCE', 'Krankenwagen'], ['FIRETRUK', 'Feuerwehr'], ['orig', 'Ursprünglichen Sound wiederherstellen'],
+  ];
+  const KIND_DEFAULTS = {
+    police: { lights: true, colors: 'blue', pattern: 'double', sound: 'POLICE' },
+    sheriff: { lights: true, colors: 'blue_red', pattern: 'alternate', sound: 'SHERIFF' },
+    ambulance: { lights: true, colors: 'blue', pattern: 'double', sound: 'AMBULANCE' },
+    fire: { lights: true, colors: 'blue', pattern: 'double', sound: 'FIRETRUK' },
+    utility: { lights: true, colors: 'amber', pattern: 'rotate', sound: 'keep' },
+    civil: { lights: false, sound: 'keep' },
+  };
+  const extraBone = (n) => (n === 10 ? 'extra_ten' : `extra_${n}`);
+
+  function equipSelect(list, value, onchange) {
+    return h('select', { onchange: (e) => onchange(e.target.value) },
+      list.map(([k, label]) => h('option', { value: k, selected: k === value || null }, label)));
+  }
+
+  // ---------------------------------------------------------------- Teile aufs Auto setzen (Lichtbalken, Gitter, Rufnamen …)
+
+  // Quaternion ⇄ Winkel (Grad), GTA-Achsen (wie im MLO Studio)
+  function toEuler(q) {
+    const [x, y, z, w] = q;
+    const roll = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
+    const pitch = Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x))));
+    const yaw = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
+    return [roll, pitch, yaw].map((a) => Math.round(a * 180 / Math.PI * 100) / 100);
+  }
+  function fromEuler(rx, ry, rz) {
+    const [r, p, y] = [rx, ry, rz].map((d) => d * Math.PI / 360);
+    const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p), cy = Math.cos(y), sy = Math.sin(y);
+    return [sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy];
+  }
+
+  let placeSeq = 0;
+
+  /** Teil zur Platzier-Liste: Startposition = Bone des Tuningteils (z. B. Dach), sonst Fahrzeugmitte. */
+  function addPlacePart(v, info, place, part) {
+    const bones = (info.modelInfo && info.modelInfo.bones) || [];
+    const b = part.bone && bones.find((x) => x.name && x.name.toLowerCase() === part.bone.toLowerCase());
+    const p = { id: `teil${++placeSeq}`, file: part.file, name: part.name, ytds: part.ytds || [], pos: b && b.pos ? [...b.pos] : [0, 0, 0], rot: [0, 0, 0, 1], always: true };
+    place.parts.push(p);
+    place.sel = p.id;
+    render(true);
+  }
+
+  /** Auswahl: Teile aus dem Paket, eigene Datei oder GTA-Objekt. */
+  function placePickDialog(v, info, place) {
+    const fromPack = [
+      ...v.parts.filter((p) => p.category !== 'Felgen' && !p.encrypted).map((p) => ({ file: p.file, name: p.name, label: `${p.category}${p.label ? ' · ' + p.label : ''}`, bone: p.bone, ytds: [...v.ytds, ...(p.ytd ? [p.ytd] : [])] })),
+      ...S.model.unassignedModels.filter((p) => !p.encrypted).map((p) => ({ file: p.file, name: p.name, label: 'Weiteres Teil im Paket', bone: p.bone, ytds: [...v.ytds, ...(p.ytd ? [p.ytd] : [])] })),
+    ];
+    const search = h('input', { type: 'text', placeholder: 'Suchen, z. B. lightbar, cage, csign, push …' });
+    const list = h('div.gta-list');
+    let chosen = null;
+    const fill = (items, note) => {
+      list.innerHTML = '';
+      if (note) list.append(h('p.muted.small', { style: { padding: '8px' } }, note));
+      for (const it of items) {
+        list.append(h('div.list-row.clickable', {
+          onclick: (ev) => { chosen = it; list.querySelectorAll('.list-row').forEach((r) => r.classList.remove('active')); ev.currentTarget.classList.add('active'); },
+          ondblclick: () => { chosen = it; done(); },
+        }, h('span', it.gta ? '🪑' : '🧩'), h('div.grow', h('div.name', it.name), h('div.muted.small', it.label || ''))));
+      }
+      if (!items.length) list.append(h('p.muted', { style: { padding: '8px' } }, 'Nichts gefunden.'));
+    };
+    let timer = null;
+    const refresh = () => {
+      const q = search.value.trim().toLowerCase();
+      const pack = fromPack.filter((p) => !q || p.name.toLowerCase().includes(q) || (p.label || '').toLowerCase().includes(q));
+      fill(pack, fromPack.length ? `${pack.length} Teile aus dem Paket${q.length >= 3 ? ' – GTA-Objekte werden gesucht …' : ''}` : 'Im Paket gibt es keine Teile. Suche nach GTA-Objekten (mind. 3 Buchstaben) oder wähle eine Datei.');
+      clearTimeout(timer);
+      if (q.length < 3) return;
+      timer = setTimeout(async () => {
+        const r = await call('props:search', { term: q }, { quiet: true });
+        if (!r || search.value.trim().toLowerCase() !== q) return;
+        fill([...pack, ...r.items.slice(0, 150).map((n) => ({ name: n, label: 'GTA-Objekt', gta: true }))],
+          `${pack.length} aus dem Paket · ${Math.min(150, r.items.length)} GTA-Objekte`);
+      }, 300);
+    };
+    search.addEventListener('input', refresh);
+    refresh();
+    let close = null;
+    const done = async () => {
+      if (!chosen) { toast('Bitte ein Teil auswählen.', 'warn'); return true; }
+      let it = chosen;
+      if (it.gta) {
+        const r = await call('vehicle:gtaProp', { name: it.name }, { busyText: `${it.name} wird aus GTA geholt …` });
+        if (!r) return true;
+        it = { file: r.model, name: it.name, ytds: r.ytds || [] };
+      }
+      addPlacePart(v, info, place, it);
+      if (close) close();
+      return false;
+    };
+    const m = modal({
+      title: '🧩 Teil aufs Auto setzen',
+      wide: true,
+      body: h('div',
+        h('p.muted', 'Wähle ein Teil – z. B. Lichtbalken, Gitter, Rufnummer oder Rammschutz. Danach im 3D-Fenster mit Pfeilen (verschieben) und Ringen (drehen) platzieren.'),
+        search, list,
+        h('div.row.gap-s', { style: { marginTop: '10px' } },
+          h('button.btn', {
+            onclick: async () => {
+              const paths = await call('dialog:open', { kind: 'partfile' });
+              if (!paths || !paths.length) return;
+              for (const p of paths) addPlacePart(v, info, place, { file: p, name: base(p).replace(/\.(yft|ydr)$/i, ''), ytds: v.ytds });
+              if (close) close();
+            },
+          }, '📄 Eigene Datei (.yft / .ydr) …'))),
+      buttons: [{ label: 'Abbrechen' }, { label: 'Aufsetzen', primary: true, onClick: done }],
+    });
+    close = m.close;
+    setTimeout(() => search.focus(), 50);
+  }
+
+  /** 3D: Auto (gesperrt) + Teile als verschiebbare Objekte. */
+  function placeViewer(v, spec, place) {
+    const V = () => window.Viewer3D;
+    const modeBtn = (mode, label) => h(`button.btn.small${place.mode === mode ? '.primary' : ''}`, {
+      onclick: (e) => {
+        place.mode = mode;
+        if (V()) V().sceneMode(mode);
+        e.currentTarget.parentNode.querySelectorAll('.btn.small').forEach((b) => b.classList.toggle('primary', b === e.currentTarget));
+      },
+    }, label);
+    const status = h('div.viewer-status', 'Auto und Teile werden geladen …');
+    const el = h('div.viewer.tall', status,
+      h('div.viewer-bar',
+        h('span.row.gap-s', modeBtn('translate', '✥ Verschieben'), modeBtn('rotate', '⟳ Drehen')),
+        h('button.btn.small', { onclick: () => V() && V().fitObject() }, '⟲ Ansicht'),
+        h('span.viewer-hint', 'Klick aufs Teil: auswählen · Pfeile/Ringe ziehen · Rechte Maustaste: Ansicht verschieben')));
+    el._scene = async () => {
+      const token = ++preview.token;
+      await viewerReady();
+      const Vw = V();
+      Vw.mount(el);
+      try {
+        const car = await getGlb(spec.main);
+        const items = [{ name: `__auto|${(spec.main.hide || []).join(',')}`, glb: car.glb }];
+        for (const p of place.parts) {
+          let glb = null;
+          try { glb = (await getGlb({ file: p.file, ytds: p.ytds })).glb; } catch (e) { toast(`${p.name}: ${e.message}`, 'warn', 8000); }
+          items.push({ name: p.file, glb });
+        }
+        if (token !== preview.token) return;
+        const ents = [{ id: '__auto', name: items[0].name, position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1], locked: true },
+          ...place.parts.map((p) => ({ id: p.id, name: p.file, position: p.pos, rotation: p.rot, scale: [1, 1] }))];
+        const keep = preview.sceneKey === v.model;
+        await Vw.sceneLoad(items, ents, { keepCamera: keep });
+        preview.sceneKey = v.model;
+        preview.lastKey = null;
+        Vw.sceneMode(place.mode);
+        Vw.sceneOn((id) => { place.sel = id; renderPlaceList(v, place); }, (id, pos, rot) => {
+          const p = place.parts.find((x) => x.id === id);
+          if (!p) return;
+          p.pos = pos.map((n) => Math.round(n * 1000) / 1000);
+          p.rot = rot;
+          renderPlaceList(v, place);
+        });
+        if (place.sel) Vw.sceneSelect(place.sel);
+        status.textContent = `${place.parts.length} Teil${place.parts.length === 1 ? '' : 'e'} – noch nicht eingebaut`;
+      } catch (e) {
+        status.textContent = `3D-Ansicht nicht möglich: ${e.message}`;
+        status.classList.add('err');
+      }
+    };
+    return el;
+  }
+
+  function renderPlaceList(v, place) {
+    const box = document.getElementById('vs-place-list');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const p of place.parts) {
+      const sel = p.id === place.sel;
+      const row = h(`div.list-row${sel ? '.active' : ''}`, {
+        onclick: (e) => { if (e.target.closest('input,button,label')) return; place.sel = p.id; if (window.Viewer3D) window.Viewer3D.sceneSelect(p.id); renderPlaceList(v, place); },
+      }, h('span', '🧩'), h('div.grow', h('div.name', p.name), h('div.muted.small', `Position ${p.pos.map((n) => n.toFixed(2)).join(' / ')} · Drehung ${toEuler(p.rot).map((n) => n.toFixed(0) + '°').join(' / ')}`)),
+      h('label.check.small', { title: 'Beim Spawnen immer dran (sonst im Spiel als Extra zuschaltbar)' },
+        h('input', { type: 'checkbox', checked: p.always || null, onchange: (e) => { p.always = e.target.checked; } }), ' immer dran'),
+      h('button.btn.small', { title: 'Entfernen', onclick: () => { place.parts = place.parts.filter((x) => x !== p); if (place.sel === p.id) place.sel = null; render(true); } }, '✕'));
+      box.append(row);
+      if (sel) {
+        const num = (val, step) => h('input.num', { type: 'number', step, value: Number(val).toFixed(step === '1' ? 0 : 3) });
+        const eu = toEuler(p.rot);
+        const px = num(p.pos[0], '0.01'), py = num(p.pos[1], '0.01'), pz = num(p.pos[2], '0.01');
+        const rx = num(eu[0], '1'), ry = num(eu[1], '1'), rz = num(eu[2], '1');
+        const apply = () => {
+          p.pos = [px, py, pz].map((i) => Number(i.value) || 0);
+          p.rot = fromEuler(Number(rx.value) || 0, Number(ry.value) || 0, Number(rz.value) || 0);
+          if (window.Viewer3D) window.Viewer3D.sceneUpdate(p.id, { position: p.pos, rotation: p.rot, scale: [1, 1] });
+          renderPlaceList(v, place);
+        };
+        for (const i of [px, py, pz, rx, ry, rz]) i.addEventListener('change', apply);
+        const nudge = (axis, d) => { p.pos[axis] = Math.round((p.pos[axis] + d) * 1000) / 1000; if (window.Viewer3D) window.Viewer3D.sceneUpdate(p.id, { position: p.pos, rotation: p.rot, scale: [1, 1] }); renderPlaceList(v, place); };
+        box.append(h('div.entity-panel',
+          h('div.entity-grid',
+            h('label', 'X (links/rechts)', px), h('label', 'Y (vorne/hinten)', py), h('label', 'Z (Höhe)', pz),
+            h('label', 'Drehung X°', rx), h('label', 'Drehung Y°', ry), h('label', 'Drehung Z°', rz)),
+          h('div.row.gap-s.wrap',
+            h('span.muted.small', 'Feinjustieren (1 cm):'),
+            h('button.btn.small', { onclick: () => nudge(2, 0.01) }, '▲ höher'), h('button.btn.small', { onclick: () => nudge(2, -0.01) }, '▼ tiefer'),
+            h('button.btn.small', { onclick: () => nudge(1, 0.01) }, '⇧ vor'), h('button.btn.small', { onclick: () => nudge(1, -0.01) }, '⇩ zurück'),
+            h('button.btn.small', { onclick: () => nudge(0, -0.01) }, '⇦ links'), h('button.btn.small', { onclick: () => nudge(0, 0.01) }, '⇨ rechts'),
+            h('button.btn.small', { onclick: () => { p.pos = [0, p.pos[1], p.pos[2]]; apply(); px.value = '0.000'; } }, 'Mittig'))));
+      }
+    }
+  }
+
+  function placePanel(v, info, place) {
+    const box = h('div.section',
+      h('div.section-head', h('h3', '🧩 Teile aufs Auto setzen'), h('span.spacer'),
+        h('button.btn.small', { onclick: () => placePickDialog(v, info, place) }, '➕ Teil hinzufügen')),
+      h('p.muted.small', 'Lichtbalken, Gitter, Rufnummer, Rammschutz … aus dem Paket, als Datei oder als GTA-Objekt aufs Auto setzen, verschieben und drehen. „Fest einbauen“ baut sie als Extras ins Modell – mit „immer dran“ spawnt das Auto direkt damit.'));
+    if (!place.parts.length) return box;
+    box.append(h('div#vs-place-list.list'));
+    box.append(h('div.row.gap-s.wrap', { style: { marginTop: '8px' } },
+      h('button.btn.primary', {
+        disabled: S.blender[v.model] === 'open' || null,
+        onclick: async () => {
+          const used = ((info.modelInfo && info.modelInfo.extras) || []).length;
+          if (used + place.parts.length > 14) { toast(`GTA erlaubt höchstens 14 Extras – das Auto hat schon ${used}.`, 'error', 9000); return; }
+          if (!await UI.confirm('Teile fest einbauen?', `${place.parts.length} Teil(e) werden als Extras ins Modell ${v.model} eingebaut. Das dauert etwas (Blender arbeitet im Hintergrund, ohne Fenster). Vorher wird eine Sicherung angelegt.`, 'Einbauen')) return;
+          const r = await call('vehicle:bakeParts', { model: v.model, ytds: v.ytds, parts: place.parts.map((p) => ({ file: p.file, pos: p.pos, rot: p.rot })) }, { busyText: 'Teile werden eingebaut (Blender im Hintergrund) …' });
+          if (!r) return;
+          const always = r.attached.filter((a, i) => place.parts[i] && place.parts[i].always).map((a) => a.extra);
+          S.dirty = true;
+          previewChanged();
+          delete S.equip[v.model];
+          for (const w of r.warnings || []) toast(w, 'warn', 10000);
+          if (always.length) {
+            const cur = await call('vehicle:equipInfo', { model: v.model }, { quiet: true });
+            const mode = cur && cur.extrasMode === 'all' ? 'all' : 'fixed';
+            const on = [...new Set([...((cur && cur.extrasMode === 'fixed') ? cur.extrasOn : []), ...always])];
+            await call('vehicle:equipApply', { model: v.model, settings: { kind: 'keep', lights: null, sirenSound: 'keep', extrasMode: mode, extrasOn: on } }, { quiet: true });
+            delete S.equip[v.model];
+            delete S.equipForm[v.model];
+          }
+          place.parts = [];
+          place.sel = null;
+          toast(`✓ Eingebaut als Extra ${r.attached.map((a) => a.extra).join(', ')}${always.length ? ` · immer dran: ${always.join(', ')}` : ''}`, 'ok', 9000);
+          await reanalyze();
+          updateStatus();
+          render(true);
+        },
+      }, '🔧 Fest einbauen'),
+      h('button.btn', { onclick: () => { place.parts = []; place.sel = null; render(true); } }, 'Alle verwerfen'),
+      h('span.muted.small', 'Tipp: Blaulicht-Punkte für einen neuen Lichtbalken setzt du danach in Blender.')));
+    setTimeout(() => renderPlaceList(v, place), 0);
+    return box;
+  }
+
+  async function viewEquip(v) {
+    if (!v) return h('p', 'Fahrzeug nicht gefunden.');
+    const wrap = h('div', h('div.content-head', h('div.title-block', h('h1', '🚨 Blaulicht & Extras'), h('div.subtitle', `${v.displayName} · `, h('code', v.model)))));
+    if (!v.hasMeta) {
+      wrap.append(h('div.notice.warn', h('b', 'Replace-Fahrzeug: '),
+        'Blaulicht und Fahrzeugtyp stehen in den Meta-Dateien des Fahrzeugs. Ein Replace benutzt die Metas von GTA – bitte zuerst in ein Addon umwandeln. ',
+        h('button.btn.small', { onclick: () => convertDialog(v) }, '🔁 In Addon umwandeln')));
+      return wrap;
+    }
+    let info = S.equip[v.model];
+    if (!info) { info = await call('vehicle:equipInfo', { model: v.model }, { quiet: true }); if (info) S.equip[v.model] = info; }
+    if (!info) { wrap.append(h('div.notice.warn', 'Die Fahrzeugdaten konnten nicht gelesen werden.')); return wrap; }
+    const mi = info.modelInfo || { sirens: [], extras: [], glass: [] };
+    const d0 = KIND_DEFAULTS[info.kind] || {};
+    const f = S.equipForm[v.model] || (S.equipForm[v.model] = {
+      kind: info.kind, lights: info.lights, colors: info.colors || d0.colors || 'blue', pattern: info.pattern || d0.pattern || 'double',
+      wigwag: info.wigwag, sound: 'keep', extrasMode: info.extrasMode, extrasOn: [...info.extrasOn], sirenId: 0,
+    });
+    const hidden = S.hiddenExtras[v.model] || (S.hiddenExtras[v.model] = new Set());
+    const redraw = () => render(true);
+    const bState = S.blender[v.model];
+
+    // 3D-Vorschau mit Blaulicht-Markern und ausgeblendeten Extras
+    const spec = carSpec(v);
+    spec.main = { ...spec.main, hide: [...new Set([...(spec.main.hide || []), ...[...hidden].map(extraBone)])].sort() };
+    if (f.lights && mi.sirens.length) spec.markers = { model: v.model, colors: f.colors };
+    const place = S.place[v.model] || (S.place[v.model] = { parts: [], sel: null, mode: 'translate' });
+    wrap.append(place.parts.length ? placeViewer(v, spec, place) : viewerPanel(spec));
+    wrap.append(placePanel(v, info, place));
+    if (bState === 'open') wrap.append(h('div.notice.info', 'Das Fahrzeug ist in Blender geöffnet. Nach „Speichern & zurück zum GTA Tool“ erscheinen neue Blaulicht-Punkte und Extras hier automatisch.'));
+    if (info.modelError) wrap.append(h('div.notice.warn', `Modell: ${info.modelError}`));
+
+    // ---- Fahrzeugtyp
+    wrap.append(h('div.section',
+      h('div.section-head', h('h3', 'Fahrzeugtyp')),
+      h('p.muted.small', 'Bestimmt, wie GTA das Fahrzeug behandelt: Einsatzfahrzeuge haben Sirene, Polizeifahrzeuge melden Verbrechen und zählen für die Fahndung.'),
+      equipSelect(KINDS, f.kind, (k) => {
+        const d = KIND_DEFAULTS[k] || {};
+        f.kind = k;
+        if (d.lights !== undefined) f.lights = d.lights;
+        if (d.colors) f.colors = d.colors;
+        if (d.pattern) f.pattern = d.pattern;
+        f.sound = d.sound && d.sound !== 'keep' && info.audio !== d.sound ? d.sound : 'keep';
+        if (k === 'civil' && info.origAudio && info.origAudio !== info.audio) f.sound = 'orig';
+        redraw();
+      })));
+
+    // ---- Blaulicht
+    const pts = mi.sirens.length;
+    const lightBox = h('div.section',
+      h('div.section-head', h('h3', 'Blaulicht')),
+      h('div.muted.small', pts
+        ? `Das Modell hat ${pts} Blaulicht-Punkt${pts === 1 ? '' : 'e'} (${mi.sirens.map((x) => x.number).join(', ')})${mi.glass.length ? ` und ${mi.glass.length} leuchtende Gläser` : ''}. In der Vorschau als farbige Rauten zu sehen.`
+        : 'Das Modell hat noch keine Blaulicht-Punkte.'),
+      h('label.check', h('input', { type: 'checkbox', checked: f.lights || null, onchange: (e) => { f.lights = e.target.checked; redraw(); } }),
+        h('span', h('b', 'Blaulicht einschalten'), h('br'), h('span.muted.small', 'Ausschalten entfernt nur das Licht – das Modell (z. B. der Lichtbalken) bleibt. Ganz entfernen: unten in Blender.'))));
+    if (f.lights) {
+      lightBox.append(h('div.mount-grid',
+        h('label.mount-item', h('span.muted.small', 'Farbe (links / rechts)'), equipSelect(COLORS, f.colors, (x) => { f.colors = x; redraw(); })),
+        h('label.mount-item', h('span.muted.small', 'Blinkmuster'), equipSelect(PATTERNS, f.pattern, (x) => { f.pattern = x; })),
+        h('label.mount-item', h('span.muted.small', `Sirenen-Ton (jetzt: ${info.audio || '–'})`), equipSelect(SOUNDS, f.sound, (x) => { f.sound = x; }))),
+      h('label.check', h('input', { type: 'checkbox', checked: f.wigwag || null, onchange: (e) => { f.wigwag = e.target.checked; } }), ' Scheinwerfer und Rückleuchten blinken im Wechsel mit'),
+      h('p.muted.small', 'Hinweis: Der Sirenen-Ton gehört in GTA zum Fahrzeug-Sound – wer ihn ändert, ändert auch den Motorsound. „Nicht ändern“ lässt den Sound, wie er ist (viele Server nutzen ein eigenes Sirenen-Script).'));
+      if (!pts) lightBox.append(h('div.notice.warn', 'Ohne Blaulicht-Punkte leuchtet nichts. Setze sie in Blender (unten) – die Einstellungen hier werden trotzdem gespeichert.'));
+    }
+    lightBox.append(h('details',
+      h('summary.muted.small', 'Erweitert'),
+      h('label.mount-item', h('span.muted.small', `Sirenen-ID (0 = automatisch${info.sirenId ? `, jetzt ${info.sirenId}` : ''})`),
+        h('input.num', { type: 'number', min: 0, max: 255, value: f.sirenId || 0, oninput: (e) => { f.sirenId = Number(e.target.value) || 0; } })),
+      h('p.muted.small', 'Jedes Blaulicht-Muster braucht auf dem Server eine eigene Nummer (1–255). 1–13 sind von GTA belegt; das Tool wählt automatisch eine freie ab 100. Nur ändern, wenn sich zwei Fahrzeuge auf deinem Server in die Quere kommen.')));
+    wrap.append(lightBox);
+
+    // ---- Extras
+    const exBox = h('div.section', h('div.section-head', h('h3', `Extras (${mi.extras.length})`)));
+    if (!mi.extras.length) exBox.append(h('p.muted', 'Das Modell hat keine Extras. Neue Extras (z. B. Lichtbalken, Rammschutz, Antenne) legst du in Blender an.'));
+    else {
+      exBox.append(h('p.muted.small', 'Extras sind Teile, die im Spiel an- und abgeschaltet werden können (z. B. Lichtbalken, Trennwand, Rammschutz). Das Auge blendet sie nur in der Vorschau aus.'),
+        h('label.mount-item', h('span.muted.small', 'Beim Spawnen'), equipSelect([
+          ['random', 'Zufällig (GTA-Standard)'], ['all', 'Alle immer an'], ['fixed', 'Ausgewählte immer an'],
+        ], f.extrasMode, (x) => { f.extrasMode = x; redraw(); })));
+      exBox.append(h('div.list', mi.extras.map((x) => h('div.list-row',
+        h('button.btn.small', { title: 'In der Vorschau ein-/ausblenden', onclick: () => { if (hidden.has(x.number)) hidden.delete(x.number); else hidden.add(x.number); redraw(); } }, hidden.has(x.number) ? '🙈' : '👁'),
+        h('div.grow', h('div.name', `Extra ${x.number}`), h('div.muted.small', `${x.name} · Position ${x.pos.map((n) => n.toFixed(2)).join(' / ')}${x.switchable ? '' : ' · ⚠ ohne eigene Kollision – im Spiel evtl. nicht schaltbar'}`)),
+        f.extrasMode === 'fixed' ? h('label.check.small', h('input', {
+          type: 'checkbox', checked: f.extrasOn.includes(x.number) || null,
+          onchange: (e) => { f.extrasOn = e.target.checked ? [...new Set([...f.extrasOn, x.number])] : f.extrasOn.filter((n) => n !== x.number); },
+        }), ' immer an') : null))));
+      exBox.append(h('p.muted.small', 'Nicht gewählte Extras sind zufällig und lassen sich im Spiel per Menü oder Script schalten. Damit ein Extra nie erscheint: in Blender entfernen.'));
+    }
+    wrap.append(exBox);
+
+    // ---- Übernehmen
+    wrap.append(h('div.row.gap-s.wrap', { style: { margin: '12px 0' } },
+      h('button.btn.primary', {
+        onclick: async () => {
+          const settings = {
+            kind: f.kind, lights: f.lights, colors: f.colors, pattern: f.pattern, wigwag: f.wigwag,
+            sirenSound: f.lights || f.sound === 'orig' ? f.sound : 'keep', sirenId: f.sirenId || 0,
+            extrasMode: mi.extras.length ? f.extrasMode : 'keep', extrasOn: f.extrasOn,
+          };
+          const r = await call('vehicle:equipApply', { model: v.model, settings }, { busyText: 'Wird gespeichert …' });
+          if (!r) return;
+          S.equip[v.model] = r.info;
+          delete S.equipForm[v.model];
+          S.dirty = true;
+          for (const w of r.warnings || []) toast(w, 'warn', 10000);
+          toast(r.changed.length ? `✓ Gespeichert (${r.changed.map(base).join(', ')})${r.sirenId ? ` · Sirenen-ID ${r.sirenId}` : ''}` : 'Keine Änderung nötig.');
+          await reanalyze();
+          updateStatus();
+          redraw();
+        },
+      }, '✓ Übernehmen'),
+      h('button.btn', { onclick: () => { delete S.equipForm[v.model]; redraw(); } }, 'Zurücksetzen'),
+      h('span.muted.small', 'Danach wie gewohnt „Als FiveM-Resource exportieren“ – Polizei, Rettung usw. sind dann fertig eingestellt.')));
+
+    // ---- Blender
+    wrap.append(h('div.section',
+      h('div.section-head', h('h3', '🧊 Blaulicht-Punkte & Extras im Modell ändern')),
+      h('p.muted.small', 'Neue Blaulicht-Punkte setzen, einen Lichtbalken entfernen oder eigene Teile als Extra einbauen – das passiert am Modell in Blender:'),
+      h('ul.muted.small',
+        h('li', 'Seitenleiste (Taste N) → „GTA Tool“ → Bereich „Blaulicht & Extras“.'),
+        h('li', 'Blaulicht-Punkt: mit Shift + Rechtsklick den 3D-Cursor aufs Auto setzen, dann „Punkt“ oder „Links + rechts“.'),
+        h('li', 'Neues Extra: Teil importieren (Datei → Import, z. B. .obj/.fbx) oder ein Teil des Autos anklicken → „Auswahl als neues Extra“.'),
+        h('li', 'Entfernen: „Alle Blaulichter entfernen“ oder „Extra entfernen“ – nimmt alles mit, was daran hängt (beim GTA-Polizeiauto z. B. den ganzen Lichtbalken).'),
+        h('li', 'Zum Schluss „Speichern & zurück zum GTA Tool“. Farben und Muster stellst du danach hier ein.')),
+      h('button.btn', { disabled: bState === 'open' || null, onclick: () => blender(v.model, v.ytds) }, bState === 'open' ? 'In Blender geöffnet' : '🧊 In Blender öffnen')));
+    return wrap;
   }
 
   // ---------------------------------------------------------------- Meta / Sonstiges
@@ -1016,14 +1429,16 @@ const VehicleStudio = (() => {
     render(true);
   }
 
-  async function onBlender({ model, state, error, files, studio }) {
+  async function onBlender({ model, state, error, files, studio, warnings }) {
     if (studio === 'clothing' || studio === 'mlo' || studio === 'anim' || (S.model && !S.model.vehicles.some((v) => v.model === model || v.parts.some((p) => p.name === model)) && state !== 'closed')) return;
     if (state === 'applied') {
       S.dirty = true;
       S.blender[model] = 'open';
       for (const f of files || []) delete S.texCache[`stream/${f}`];
+      delete S.equip[model];
       previewChanged();
       toast(`✓ Aus Blender übernommen: ${(files || []).join(', ')}`);
+      for (const w of warnings || []) toast(w, 'warn', 10000);
       await reanalyze();
       updateStatus();
       render(true);

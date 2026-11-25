@@ -371,7 +371,7 @@ async function openInBlender({ model, ytds }) {
       entry.lastExport = st.last;
       try {
         const res = await call('blender.apply', { sessionDir: sd, exportDir: prep.exportDir, model, backupDir: path.join(sd, 'backup') });
-        send('blender', { model, state: 'applied', files: res.applied });
+        send('blender', { model, state: 'applied', files: res.applied, warnings: res.warnings || [] });
       } catch (e) {
         send('blender', { model, state: 'error', error: e.message });
       }
@@ -428,11 +428,12 @@ function registerIpc() {
       ytd: { title: 'Texturdatei wählen', properties: ['openFile'], filters: [{ name: 'GTA-Texturen', extensions: ['ytd'] }] },
       outdir: { title: 'Zielordner wählen', properties: ['openDirectory', 'createDirectory'] },
       ydr: { title: 'Modell wählen (.ydr)', properties: ['openFile'], filters: [{ name: 'GTA-Modell', extensions: ['ydr'] }] },
+      partfile: { title: 'Teil wählen (.yft / .ydr)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'GTA-Modell', extensions: ['yft', 'ydr'] }] },
       wav: { title: 'WAV-Datei wählen', properties: ['openFile'], filters: [{ name: 'WAV-Audio', extensions: ['wav'] }] },
       exe: { title: 'Programm wählen', properties: ['openFile'], filters: [{ name: 'Programm', extensions: ['exe'] }] },
       gta: { title: 'GTA-V-Ordner wählen (mit GTA5.exe)', properties: ['openDirectory'] },
     }[kind];
-    const importKinds = ['folder', 'archive', 'files', 'animfiles', 'propfiles', 'weaponfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
+    const importKinds = ['folder', 'archive', 'partfile', 'files', 'animfiles', 'propfiles', 'weaponfiles', 'images', 'image', 'yft', 'ytd', 'wav', 'ydr'];
     const isImport = importKinds.includes(kind);
     const start = isImport ? settings.lastImportDir : kind === 'outdir' ? (settings.lastResourceDir || settings.lastExportDir) : null;
     if (start && fs.existsSync(start)) opts.defaultPath = start;
@@ -1022,6 +1023,48 @@ function registerIpc() {
   handle('vehicle:rename', async (a) => call('vehicle.rename', {
     sessionDir, oldModel: a.oldModel, newModel: a.newModel, displayName: a.displayName || '', makeName: a.makeName || '', backupDir: backupDir(),
   }));
+
+  // Einsatzfahrzeuge: Blaulicht & Extras
+  handle('vehicle:equipInfo', async ({ model }) => call('vehicle.equipInfo', { sessionDir, model }));
+  handle('vehicle:equipApply', async ({ model, settings }) => call('vehicle.equipApply', { sessionDir, model, settings, backupDir: backupDir() }));
+  handle('vehicle:gtaProp', async ({ name }) => call('props.extract', { gtaPath: settings.gtaPath || '', cacheFile: propsCache(), name, cacheDir: propsDir() }));
+  // Teile fest einbauen: Blender im Hintergrund (ohne Fenster) importiert die Teile an der gewählten Stelle als Extras
+  handle('vehicle:bakeParts', async ({ model, ytds, parts }) => {
+    requireBlender();
+    if (blenderSessions.has(model)) throw new Error(`${model} ist gerade in Blender geöffnet – bitte dort zuerst „Speichern & zurück“ und Blender schließen.`);
+    const sd = sessionDir;
+    const prep = await call('blender.prepare', { sessionDir: sd, model, ytds: ytds || [] });
+    const partsDir = path.join(prep.workDir, 'teile');
+    const spec = { parts: parts.map((p, i) => {
+      const src = abs(p.file);
+      const dir = path.join(partsDir, String(i));
+      fs.mkdirSync(dir, { recursive: true });
+      const dst = path.join(dir, path.basename(src));
+      fs.copyFileSync(src, dst);
+      return { file: dst, pos: p.pos, rot: p.rot, extra: null };
+    }) };
+    const specFile = path.join(prep.workDir, 'teile.json');
+    fs.writeFileSync(specFile, JSON.stringify(spec));
+    const statusFile = path.join(prep.workDir, 'teile_status.json');
+    try { fs.rmSync(statusFile, { force: true }); } catch { /* egal */ }
+    send('progress', { text: 'Blender baut die Teile ein (im Hintergrund, kann etwas dauern) …' });
+    await new Promise((resolve, reject) => {
+      const proc = spawn(settings.blenderPath, ['-b', '--python', BRIDGE, '--', '--yft', prep.yft, '--export', prep.exportDir, '--status', statusFile, '--auto-export', '--attach', specFile], { stdio: 'ignore', windowsHide: true });
+      proc.on('error', (e) => reject(new Error(`Blender konnte nicht gestartet werden: ${e.message}`)));
+      proc.on('exit', () => resolve());
+    });
+    let st = {};
+    try { st = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch { /* keine Statusdatei */ }
+    if (st.error || st.event !== 'exported') throw new Error(`Einbauen fehlgeschlagen: ${st.error || 'Blender hat nichts exportiert.'}`);
+    const res = await call('blender.apply', { sessionDir: sd, exportDir: prep.exportDir, model, backupDir: path.join(sd, 'backup') });
+    return { applied: res.applied, warnings: res.warnings || [], attached: st.attached || [] };
+  });
+  handle('vehicle:sirenMarkers', async ({ model, colors }) => {
+    const outDir = path.join(sessionDir || TEMP_ROOT, 'vorschau');
+    const r = await call('vehicle.sirenMarkers', { sessionDir, model, colors: colors || 'blue', outDir });
+    const glbs = (r.files || []).map((f) => { const b = fs.readFileSync(f); fs.rm(f, { force: true }, () => {}); return b; });
+    return { glbs };
+  });
 
   // Motorsounds
   handle('audio:info', async () => call('audio.info', { sessionDir }));

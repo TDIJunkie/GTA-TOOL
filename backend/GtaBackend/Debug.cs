@@ -9,7 +9,7 @@ public static class DebugInfo
     public static object ExtractFromRpf(string rpfPath, string entryPath, string outFile)
     {
         var rpf = new RpfFile(rpfPath, Path.GetFileName(rpfPath));
-        rpf.ScanStructure(null, null);
+        rpf.ScanStructure(_ => { }, _ => { });
         RpfFileEntry found = null;
         RpfFile owner = null;
         void Walk(RpfFile f)
@@ -31,7 +31,7 @@ public static class DebugInfo
     public static object FindInRpf(string rpfPath, string term)
     {
         var rpf = new RpfFile(rpfPath, Path.GetFileName(rpfPath));
-        rpf.ScanStructure(null, null);
+        rpf.ScanStructure(_ => { }, _ => { });
         var hits = new List<string>();
         void Walk(RpfFile f)
         {
@@ -88,7 +88,7 @@ public static class DebugInfo
         var hits = new List<string>(); int ytyps = 0, failed = 0; var failedNames = new List<string>();
         foreach (var a in archives)
         {
-            RpfFile rpf; try { rpf = new RpfFile(a, Path.GetFileName(a)); rpf.ScanStructure(null, null); } catch (Exception ex) { hits.Add("ARCHIV " + a + ": " + ex.Message); continue; }
+            RpfFile rpf; try { rpf = new RpfFile(a, Path.GetFileName(a)); rpf.ScanStructure(_ => { }, _ => { }); } catch (Exception ex) { hits.Add("ARCHIV " + a + ": " + ex.Message); continue; }
             void Walk(RpfFile f)
             {
                 foreach (var e in f.AllEntries ?? new List<RpfEntry>())
@@ -182,6 +182,13 @@ public static class DebugXml
     public static object ToXml(string file, string outFile)
     {
         var data = File.ReadAllBytes(file);
+        if (data.Length > 4 && data[0] == 'P' && data[1] == 'S' && data[2] == 'I' && data[3] == 'N')
+        {
+            var pso = new CodeWalker.GameFiles.PsoFile(); pso.Load(data);
+            var px = CodeWalker.GameFiles.PsoXml.GetXml(pso);
+            File.WriteAllText(outFile, px);
+            return new { outFile, length = px.Length };
+        }
         var entry = CodeWalker.GameFiles.RpfFile.CreateResourceFileEntry(ref data, 0);
         entry.Name = Path.GetFileName(file);
         entry.NameLower = entry.Name.ToLowerInvariant();

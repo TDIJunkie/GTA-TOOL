@@ -538,7 +538,8 @@ def prepared_copies(meshes, model):
             if mesh.materials[si] is None:
                 continue
             mesh.materials[si] = mesh.materials[si].copy()
-            _ensure_color_texture(mesh.materials[si], f"{i}_{si}", model)
+            if str(getattr(mesh.materials[si], "sollum_type", "")) != "sollumz_material_shader":   # GTA-Shader schon fertig
+                _ensure_color_texture(mesh.materials[si], f"{i}_{si}", model)
         if not mesh.uv_layers:
             mesh.uv_layers.new(name="UVMap")
             bpy.ops.object.select_all(action="DESELECT")
@@ -1216,6 +1217,483 @@ def test_edit():
     print("TEST-EDIT", [fc.data_path for fc in target])
 
 
+# ---------------------------------------------------------------- Fahrzeug: Blaulicht & Extras
+# GTA: Blaulicht-Punkte = Bones „siren1“ … „siren20“ (Licht/Corona sitzt am Bone), leuchtende Gläser = „siren_glassN“.
+# Extras = Bone „extra_N“ (10 heißt „extra_ten“) mit eigenem Teil + eigener Kollision (sonst nicht schaltbar).
+# Bone-Tags berechnet Sollumz beim Export aus dem Namen – sie stimmen mit GTA überein.
+
+MAX_SIRENS = 20
+MAX_EXTRAS = 14
+
+
+def extra_bone_name(n):
+    return "extra_ten" if n == 10 else f"extra_{n}"
+
+
+def extra_number(name):
+    n = name.lower()
+    if n == "extra_ten":
+        return 10
+    if n.startswith("extra_") and n[6:].isdigit():
+        return int(n[6:])
+    return None
+
+
+def vehicle_frag():
+    for o in fragments():
+        if o.type == "ARMATURE" and o.data.bones.get("chassis") is not None:
+            return o
+    return None
+
+
+def _frag_parts(frag):
+    drawables = [c for c in frag.children if stype(c) == "sollumz_drawable"]
+    composite = next((c for c in frag.children if stype(c) == "sollumz_bound_composite"), None)
+    return (drawables[0] if drawables else None), composite
+
+
+def siren_numbers(frag):
+    out = []
+    for b in frag.data.bones:
+        n = b.name.lower()
+        if n.startswith("siren") and n[5:].isdigit():
+            out.append(int(n[5:]))
+    return sorted(out)
+
+
+def extra_numbers(frag):
+    return sorted(n for n in (extra_number(b.name) for b in frag.data.bones) if n)
+
+
+def _set_rot_flags(bone):
+    bp = bone.bone_properties
+    if not len(bp.flags):
+        for f in ("RotX", "RotY", "RotZ"):
+            bp.flags.add().name = f
+
+
+def _edit_armature(frag):
+    bpy.ops.object.select_all(action="DESELECT")
+    frag.hide_set(False)
+    frag.select_set(True)
+    bpy.context.view_layer.objects.active = frag
+    bpy.ops.object.mode_set(mode="EDIT")
+
+
+def add_bones(frag, items):
+    """items: [(name, (x, y, z) im Fahrzeug-Raum, parent-name)] → neue Bones (Länge 5 cm, wie GTA)."""
+    if bpy.context.object and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    _edit_armature(frag)
+    try:
+        eb = frag.data.edit_bones
+        for name, pos, parent in items:
+            b = eb.new(name)
+            b.head = pos
+            b.tail = (pos[0], pos[1] + 0.05, pos[2])
+            b.parent = eb.get(parent) or eb.get("chassis")
+    finally:
+        bpy.ops.object.mode_set(mode="OBJECT")
+    for name, _, _ in items:
+        _set_rot_flags(frag.data.bones[name])
+
+
+def _bone_at(frag, point):
+    """Bone des Teils unter dem Punkt (z. B. Lichtbalken = extra_1) – sonst chassis."""
+    best, dist = None, 1e9
+    for o in frag.children_recursive:
+        if o.type != "MESH" or stype(o) != "sollumz_drawable_model" or not o.vertex_groups:
+            continue
+        bb = [o.matrix_world @ v.co for v in o.data.vertices[:2000]] if o.data.vertices else []
+        if not bb:
+            continue
+        mn = [min(v[i] for v in bb) for i in range(3)]
+        mx = [max(v[i] for v in bb) for i in range(3)]
+        inside = all(mn[i] - 0.03 <= point[i] <= mx[i] + 0.03 for i in range(3))
+        if not inside:
+            continue
+        vol = (mx[0] - mn[0]) * (mx[1] - mn[1]) * (mx[2] - mn[2])
+        if vol < dist:
+            best, dist = o.vertex_groups[0].name, vol
+    if best and frag.data.bones.get(best) is not None and not best.lower().startswith("siren"):
+        return best
+    return "chassis"
+
+
+def vehicle_add_siren(point, mirror=False):
+    frag = vehicle_frag()
+    if frag is None:
+        raise RuntimeError("Kein Fahrzeug in der Szene.")
+    used = set(siren_numbers(frag))
+    free = [n for n in range(1, MAX_SIRENS + 1) if n not in used]
+    pts = [tuple(point)]
+    if mirror and abs(point[0]) > 0.02:
+        pts.append((-point[0], point[1], point[2]))
+    if len(free) < len(pts):
+        raise RuntimeError(f"GTA erlaubt höchstens {MAX_SIRENS} Blaulicht-Punkte – alle belegt.")
+    inv = frag.matrix_world.inverted()
+    items = []
+    for i, p in enumerate(pts):
+        lp = inv @ __import__("mathutils").Vector(p)
+        items.append((f"siren{free[i]}", tuple(lp), _bone_at(frag, p)))
+    add_bones(frag, items)
+    return [n for n, _, _ in items]
+
+
+def _delete_bone_geometry(frag, names):
+    """Alles löschen, was an diesen Bones hängt: Teile (Vertex-Gruppen), Kollisionen, die Bones selbst."""
+    names = set(names)
+    removed_objs = 0
+    for o in list(frag.children_recursive):
+        if o.type != "MESH":
+            continue
+        st = stype(o)
+        if st.startswith("sollumz_bound"):
+            c = next((c for c in o.constraints if c.type == "COPY_TRANSFORMS" and c.subtarget), None)
+            if c is not None and c.subtarget in names:
+                bpy.data.objects.remove(o, do_unlink=True)
+                removed_objs += 1
+            continue
+        if st != "sollumz_drawable_model":
+            continue
+        idx = {g.index for g in o.vertex_groups if g.name in names}
+        if not idx:
+            continue
+        doomed = [v.index for v in o.data.vertices if any(g.group in idx and g.weight > 0.5 for g in v.groups)]
+        if len(doomed) >= len(o.data.vertices):
+            bpy.data.objects.remove(o, do_unlink=True)
+            removed_objs += 1
+            continue
+        if doomed:
+            import bmesh
+            bm = bmesh.new()
+            bm.from_mesh(o.data)
+            bm.verts.ensure_lookup_table()
+            bmesh.ops.delete(bm, geom=[bm.verts[i] for i in doomed], context="VERTS")
+            bm.to_mesh(o.data)
+            bm.free()
+            # auch in den anderen LOD-Stufen nicht mehr benutzen
+        for g in [g for g in o.vertex_groups if g.name in names]:
+            o.vertex_groups.remove(g)
+    _edit_armature(frag)
+    try:
+        eb = frag.data.edit_bones
+        for n in names:
+            b = eb.get(n)
+            if b is None:
+                continue
+            for ch in list(b.children):
+                if ch.name not in names:
+                    ch.parent = b.parent
+            eb.remove(b)
+    finally:
+        bpy.ops.object.mode_set(mode="OBJECT")
+    return removed_objs
+
+
+def vehicle_remove_sirens():
+    frag = vehicle_frag()
+    if frag is None:
+        raise RuntimeError("Kein Fahrzeug in der Szene.")
+    names = [b.name for b in frag.data.bones if b.name.lower().startswith("siren")]
+    if not names:
+        raise RuntimeError("Das Fahrzeug hat keine Blaulicht-Punkte.")
+    _delete_bone_geometry(frag, names)
+    return len(names)
+
+
+def vehicle_remove_extra(n):
+    frag = vehicle_frag()
+    name = extra_bone_name(n)
+    if frag is None or frag.data.bones.get(name) is None:
+        raise RuntimeError(f"Extra {n} gibt es nicht.")
+    # alles darunter (z. B. Blaulichter auf dem Lichtbalken) gehört dazu
+    names = [name] + [b.name for b in frag.data.bones[name].children_recursive]
+    _delete_bone_geometry(frag, names)
+    return names
+
+
+def _belongs(o, root):
+    p = o.parent
+    while p is not None:
+        if p == root:
+            return True
+        p = p.parent
+    return False
+
+
+def _image_has_data(img):
+    if img.packed_file:
+        return True
+    try:
+        return bool(img.filepath) and Path(bpy.path.abspath(img.filepath)).is_file()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def attach_parts(spec_path):
+    """Teile (.yft/.ydr) an gewählter Stelle als Extras ins Fahrzeug einbauen (vom GTA Tool, ohne Fenster).
+    spec: {"parts": [{"file", "pos": [x,y,z], "rot": [x,y,z,w] (GTA-Quaternion), "extra": n|null}]}"""
+    import mathutils
+    with open(spec_path, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    frag = vehicle_frag()
+    if frag is None:
+        raise RuntimeError("Kein Fahrzeug in der Szene.")
+    done = []
+    for p in spec.get("parts", []):
+        f = Path(p["file"])
+        before = set(bpy.data.objects)
+        res = bpy.ops.sollumz.import_assets(directory=str(f.parent), files=[{"name": f.name}], use_custom_settings=True)
+        if "FINISHED" not in res:
+            raise RuntimeError(f"Sollumz konnte {f.name} nicht importieren.")
+        new = [o for o in bpy.data.objects if o not in before]
+        pos = p.get("pos") or [0, 0, 0]
+        q = p.get("rot") or [0, 0, 0, 1]
+        place = mathutils.Matrix.Translation(pos) @ mathutils.Quaternion((q[3], q[0], q[1], q[2])).to_matrix().to_4x4()
+        for r in [o for o in new if o.parent is None]:
+            r.matrix_world = place @ r.matrix_world
+        bpy.context.view_layer.update()
+        meshes = [o for o in new if o.type == "MESH" and stype(o) == "sollumz_drawable_model" and o.data.vertices]
+        if not meshes:
+            raise RuntimeError(f"{f.name} enthält kein sichtbares Modell.")
+        n = vehicle_make_extra(meshes, p.get("extra"))
+        for o in new:
+            if o.name in bpy.data.objects:
+                bpy.data.objects.remove(o, do_unlink=True)
+        done.append({"file": f.name, "extra": n})
+        print("ANGEBAUT", f.name, "→ Extra", n)
+    STATE["attached"] = done
+    return done
+
+
+def _template_col_material(composite):
+    for o in (composite.children if composite else []):
+        if o.type == "MESH" and o.data.materials and o.data.materials[0] is not None:
+            return o.data.materials[0]
+    return collision_material()
+
+
+def vehicle_make_extra(meshes, n=None):
+    """Ausgewählte Meshes → neues Extra (eigenes Teil + Bone + Kollisionsbox). Gibt die Nummer zurück."""
+    import mathutils
+    frag = vehicle_frag()
+    if frag is None:
+        raise RuntimeError("Kein Fahrzeug in der Szene.")
+    drawable, composite = _frag_parts(frag)
+    if drawable is None or composite is None:
+        raise RuntimeError("Fahrzeug ohne Modell oder Kollision – Extra kann nicht angelegt werden.")
+    meshes = [m for m in meshes if m.type == "MESH" and not stype(m).startswith("sollumz_bound")]
+    if not meshes:
+        raise RuntimeError("Bitte zuerst das Teil auswählen, das ein Extra werden soll (Klick darauf).")
+    used = set(extra_numbers(frag))
+    if n is None:
+        free = [i for i in range(1, MAX_EXTRAS + 1) if i not in used]
+        if not free:
+            raise RuntimeError(f"Alle {MAX_EXTRAS} Extras sind belegt.")
+        n = free[0]
+    name = extra_bone_name(n)
+    if bpy.context.object and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    own = [m for m in meshes if stype(m) == "sollumz_drawable_model" and _belongs(m, frag)]   # Teile des Autos (z. B. Lichtbalken)
+    foreign = [m for m in meshes if m not in own]                     # neu importierte Teile
+    parts = []
+    if foreign:
+        dups = prepared_copies(foreign, MODEL)
+        bpy.ops.object.select_all(action="DESELECT")
+        for d in dups:
+            d.select_set(True)
+        bpy.context.view_layer.objects.active = dups[0]
+        bpy.ops.sollumz.autoconvertmaterials()
+        for d in dups:
+            for m in d.data.materials:
+                if m and m.node_tree:
+                    for node in m.node_tree.nodes:
+                        if node.bl_idname == "ShaderNodeTexImage" and node.image is not None:
+                            node.texture_properties.embedded = False  # Textur kommt in die .ytd des Fahrzeugs (GTA Tool)
+                            if _image_has_data(node.image):           # fehlende Bilder: Name bleibt, Textur kommt aus der .ytd
+                                tex_dir = EXPORT_DIR / "texturen"
+                                tex_dir.mkdir(parents=True, exist_ok=True)
+                                save_texture(node, tex_dir)
+        if len(dups) > 1:
+            bpy.ops.object.select_all(action="DESELECT")
+            for d in dups:
+                d.select_set(True)
+            bpy.context.view_layer.objects.active = dups[0]
+            bpy.ops.object.join()
+        new = dups[0]
+        new.name = name
+        for o in foreign:   # Original (z. B. importiertes .obj) ausblenden, nicht löschen
+            o.hide_set(True)
+            o.hide_render = True
+        mw = new.matrix_world.copy()
+        new.parent = drawable
+        new.matrix_world = mw
+        try:
+            from importlib import import_module
+            dh = None
+            for prefix in ("bl_ext.user_default.sollumz", "bl_ext.blender_org.sollumz", "sollumz"):
+                try:
+                    dh = import_module(prefix + ".tools.drawablehelper")
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+            dh.convert_obj_to_model(new)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Teil konnte nicht umgewandelt werden: {exc}")
+        mod = new.modifiers.new("skel", "ARMATURE")
+        mod.object = frag
+        parts.append(new)
+    parts += own
+
+    # Mittelpunkt der Auswahl (Weltlage) → Bone-Position
+    pts = [p.matrix_world @ v.co for p in parts for v in p.data.vertices]
+    if not pts:
+        raise RuntimeError("Das ausgewählte Teil hat keine Punkte.")
+    mn = mathutils.Vector([min(v[i] for v in pts) for i in range(3)])
+    mx = mathutils.Vector([max(v[i] for v in pts) for i in range(3)])
+    center = (mn + mx) / 2
+    inv = frag.matrix_world.inverted()
+    if frag.data.bones.get(name) is None:
+        add_bones(frag, [(name, tuple(inv @ center), "chassis")])
+    bone = frag.data.bones[name]
+    bone.sollumz_use_physics = True
+
+    # Alle Punkte der Teile hängen zu 100 % am Extra-Bone
+    for p in parts:
+        for g in list(p.vertex_groups):
+            p.vertex_groups.remove(g)
+        g = p.vertex_groups.new(name=name)
+        g.add([v.index for v in p.data.vertices], 1.0, "REPLACE")
+        if not any(m.type == "ARMATURE" for m in p.modifiers):
+            mod = p.modifiers.new("skel", "ARMATURE")
+            mod.object = frag
+
+    # Kollisionsbox im Bone-Raum (ohne eigene Kollision lässt sich ein Extra im Spiel nicht schalten)
+    head = frag.matrix_world @ bone.head_local
+    lmn, lmx = mn - head, mx - head
+    for i in range(3):   # flache Teile: mind. 2 cm dick
+        if lmx[i] - lmn[i] < 0.02:
+            lmn[i] -= 0.01
+            lmx[i] += 0.01
+    col = bpy.data.objects.new(name + ".col", _box_mesh(name + ".col", tuple(lmn), tuple(lmx)))
+    col.sollum_type = "sollumz_bound_geometry"
+    mat = _template_col_material(composite)
+    if mat is not None:
+        col.data.materials.append(mat)
+    for c in composite.users_collection:
+        c.objects.link(col)
+    col.parent = composite
+    con = col.constraints.new("COPY_TRANSFORMS")
+    con.target = frag
+    con.subtarget = name
+    try:
+        con.target_space = "POSE"
+        con.owner_space = "LOCAL"
+    except Exception:  # noqa: BLE001
+        pass
+    return n
+
+
+class GTATOOL_OT_add_siren(bpy.types.Operator):
+    bl_idname = "gtatool.add_siren"
+    bl_label = "Blaulicht-Punkt am 3D-Cursor"
+    bl_description = "Neuer Blaulicht-Punkt (Bone sirenN) an der Stelle des 3D-Cursors – Shift + Rechtsklick setzt den Cursor aufs Auto"
+    mirror: bpy.props.BoolProperty(name="Gespiegelt (links + rechts)", default=False)
+
+    def execute(self, context):
+        try:
+            names = vehicle_add_siren(context.scene.cursor.location, self.mirror)
+            self.report({"INFO"}, "Blaulicht-Punkt angelegt: " + ", ".join(names))
+            return {"FINISHED"}
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+
+class GTATOOL_OT_remove_sirens(bpy.types.Operator):
+    bl_idname = "gtatool.remove_sirens"
+    bl_label = "Alle Blaulichter entfernen"
+    bl_description = "Löscht alle Blaulicht-Punkte und -Gläser (siren…) samt Leuchten"
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        try:
+            n = vehicle_remove_sirens()
+            self.report({"INFO"}, f"{n} Blaulicht-Bones entfernt.")
+            return {"FINISHED"}
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+
+def _extra_items(self, context):
+    frag = vehicle_frag()
+    nums = extra_numbers(frag) if frag else []
+    return [(str(n), f"Extra {n}", "") for n in nums] or [("0", "keine Extras", "")]
+
+
+class GTATOOL_OT_remove_extra(bpy.types.Operator):
+    bl_idname = "gtatool.remove_extra"
+    bl_label = "Extra entfernen"
+    bl_description = "Löscht ein Extra komplett (Teil, Kollision und alles, was daran hängt – z. B. Blaulichter auf dem Lichtbalken)"
+    extra: bpy.props.EnumProperty(name="Extra", items=_extra_items)
+
+    def execute(self, context):
+        try:
+            if self.extra == "0":
+                raise RuntimeError("Das Fahrzeug hat keine Extras.")
+            names = vehicle_remove_extra(int(self.extra))
+            self.report({"INFO"}, "Entfernt: " + ", ".join(names))
+            return {"FINISHED"}
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+
+class GTATOOL_OT_make_extra(bpy.types.Operator):
+    bl_idname = "gtatool.make_extra"
+    bl_label = "Auswahl als neues Extra"
+    bl_description = "Macht die ausgewählten Teile zu einem Extra (im Spiel an-/abschaltbar). Auch für importierte Teile, z. B. Lichtbalken oder Rammschutz"
+
+    def execute(self, context):
+        try:
+            n = vehicle_make_extra(list(context.selected_objects))
+            self.report({"INFO"}, f"Extra {n} angelegt.")
+            return {"FINISHED"}
+        except Exception as exc:  # noqa: BLE001
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+
+VEHICLE_OPS = (GTATOOL_OT_add_siren, GTATOOL_OT_remove_sirens, GTATOOL_OT_remove_extra, GTATOOL_OT_make_extra)
+
+
+def draw_vehicle_tools(col):
+    frag = vehicle_frag()
+    if frag is None:
+        return
+    col.separator()
+    box = col.box()
+    box.label(text="Blaulicht & Extras", icon="LIGHT_SUN")
+    sir = siren_numbers(frag)
+    ext = extra_numbers(frag)
+    box.label(text=f"Blaulicht-Punkte: {len(sir)} / {MAX_SIRENS}")
+    box.label(text="Extras: " + (", ".join(str(n) for n in ext) if ext else "keine"))
+    r = box.row(align=True)
+    r.operator(GTATOOL_OT_add_siren.bl_idname, text="Punkt", icon="ADD").mirror = False
+    r.operator(GTATOOL_OT_add_siren.bl_idname, text="Links + rechts", icon="MOD_MIRROR").mirror = True
+    box.label(text="Cursor setzen: Shift + Rechtsklick")
+    box.operator(GTATOOL_OT_remove_sirens.bl_idname, icon="TRASH")
+    box.separator()
+    box.operator(GTATOOL_OT_make_extra.bl_idname, icon="PLUS")
+    box.operator_menu_enum(GTATOOL_OT_remove_extra.bl_idname, "extra", text="Extra entfernen", icon="X")
+    box.label(text="Farbe/Muster: im GTA Tool einstellen")
+
+
 class GTATOOL_OT_send_back(bpy.types.Operator):
     bl_idname = "gtatool.send_back"
     bl_label = "Speichern & zurück zum GTA Tool"
@@ -1258,6 +1736,8 @@ class GTATOOL_PT_panel(bpy.types.Panel):
                 col.label(text=f"Clip: {CLIP}")
         else:
             col.label(text=f"Modell: {MODEL}", icon="AUTO")
+            if EXT == ".yft":
+                draw_vehicle_tools(col)
         shown = False
         for cname, label, icon in ((COLL_ENV, "Umliegende GTA-Gebäude", "WORLD"), (COLL_REF, "Restliches Interior", "HOME"),
                                    (COLL_REF_COL, "Andere Kollisionen", "MOD_PHYSICS")):
@@ -1402,6 +1882,12 @@ def main():
         bpy.app.timers.register(open_sidebar, first_interval=0.5)
         return
     sollumz_import(YFT)
+    if EXT == ".yft":
+        for cls in VEHICLE_OPS:
+            try:
+                bpy.utils.register_class(cls)
+            except ValueError:
+                pass
     if IS_YDD:
         import_body_reference()
     if ARGS.get("surroundings"):
@@ -1409,12 +1895,35 @@ def main():
             mlo_load_surroundings(ARGS["surroundings"])
         except Exception as exc:  # noqa: BLE001
             print("Umgebung konnte nicht geladen werden:", exc)
+    if ARGS.get("attach"):
+        attach_parts(ARGS["attach"])
     write_status("ready")
     if ARGS.get("auto-export"):
+        if ARGS.get("test-vehicle"):
+            test_vehicle(str(ARGS["test-vehicle"]))
         do_export()
         bpy.ops.wm.quit_blender()
         return
     bpy.app.timers.register(open_sidebar, first_interval=0.5)
+
+
+def test_vehicle(steps):
+    """Nur für automatische Tests: Blaulicht/Extras wie ein Nutzer bearbeiten (Schritte mit Komma getrennt)."""
+    for step in steps.split(","):
+        step = step.strip()
+        if step == "add_siren":
+            print("TEST add_siren", vehicle_add_siren((0.45, -0.2, 1.45), mirror=True))
+        elif step == "remove_sirens":
+            print("TEST remove_sirens", vehicle_remove_sirens())
+        elif step.startswith("remove_extra"):
+            print("TEST remove_extra", vehicle_remove_extra(int(step.split(":")[1])))
+        elif step == "make_extra":
+            bpy.ops.mesh.primitive_cube_add(size=0.3, location=(0.0, 1.9, 0.75))
+            cube = bpy.context.object
+            print("TEST make_extra", vehicle_make_extra([cube]))
+        elif step.startswith("make_extra_own:"):
+            o = bpy.data.objects[step.split(":")[1]]
+            print("TEST make_extra_own", vehicle_make_extra([o]))
 
 
 def heartbeat():

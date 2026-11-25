@@ -454,3 +454,33 @@ Backend `Weapons.cs`, Oberfläche `weapons.js`.
       Passwort-Archive → verständliche Meldung (nicht unterstützt). Datei-Dialoge + Startflächen-Texte um .zip/.rar/.7z ergänzt.
 - Getestet (Backend direkt, MLO „moreo_cafecute“): zip, 7z, mehrteiliges RAR5, solides RAR, Ordner mit zip, zip+rar zusammen →
   jeweils 252 Objekte/27 Modelle/3 Kollisionen, Original-Resource erkannt, Dateien byte-gleich, Temp aufgeräumt. Oberfläche nicht per CDP getestet.
+
+### Stand 25.11.2026 (3) – Vehicle Studio: Blaulicht & Extras (Einsatzfahrzeuge)
+- [x] Neue Ansicht „🚨 Blaulicht & Extras“ je Fahrzeug (Baum + Aktion in der Fahrzeugansicht), Backend `Emergency.cs`.
+  - **Fahrzeugtyp** Zivil / Polizei / Sheriff / Rettung / Feuerwehr / Abschlepp: `vehicleClass` (VC_EMERGENCY, Original wird in
+    `einsatz.json` der Sitzung gemerkt und bei „Zivil“ wiederhergestellt) + Flags FLAG_LAW_ENFORCEMENT / FLAG_EMERGENCY_SERVICE /
+    FLAG_REPORT_CRIME_IF_STANDING_ON.
+  - **Blaulicht**: eigener `<Sirens>`-Eintrag in carcols.meta (Farbe links/rechts je Bone-X, Muster Doppelblitz/Wechsel/gleichzeitig/
+    Rundum, optional Scheinwerfer-Wechsel), ID automatisch ab 100 (JenkHash des Modells, frei), Name `gtatool|farbe|muster|wigwag|modell`
+    → Formular wird beim Wiederöffnen gefüllt. `sirenSettings` in carvariations; fehlt carvariations/carcols, wird sie angelegt.
+  - **Sirenen-Ton** = `audioNameHash` (POLICE, SHERIFF, AMBULANCE, FIRETRUK …) – ändert auch den Motorsound, Original gemerkt.
+  - **Extras**: Liste aus der YFT (Bones `extra_N`, 10 = `extra_ten`), „schaltbar“ = Fragment-Kind vorhanden; beim Spawnen zufällig /
+    alle (FLAG_EXTRAS_ALL) / ausgewählte (`requiredExtras`); Vorschau: Auge blendet Extra inkl. Kind-Bones aus.
+  - 3D-Vorschau: Blaulicht-Punkte als farbige Rauten (`vehicle.sirenMarkers`).
+- [x] **Blender** (Bridge, nur bei Fahrzeugen): Bereich „Blaulicht & Extras“ – Blaulicht-Punkt am 3D-Cursor (auch gespiegelt; Parent = Teil
+  unter dem Cursor, z. B. Lichtbalken), alle Blaulichter entfernen, Extra entfernen (inkl. aller Kind-Bones/Teile/Kollision),
+  „Auswahl als neues Extra“ (Teil des Autos oder importiertes Mesh → Bone + Vertex-Gruppe 100 % + Kollisionsbox mit COPY_TRANSFORMS).
+  Bone-Tags berechnet Sollumz aus dem Namen = GTA-Formel `ElfHash(NAME) % 0xFE8F + 0x170` (an 20 GTA-Einsatzfahrzeugen geprüft).
+  Texturen neuer Teile → `texturen\` → `BlenderBridge.Apply` fügt sie in `<modell>.ytd` ein (Fehler nur als Warnung).
+- Getestet: Backend mit GTA-police.yft (Polizei → Zivil hin/zurück, Export mit CARCOLS/VARIATION-data_file), Blender headless
+  (Lichtbalken = Extra 1 entfernt, Würfel als Extra 1 schaltbar, 2 Blaulicht-Punkte mit richtigen Tags, keine Sollumz-Warnungen),
+  Oberfläche per CDP (versteckt). **Im Spiel noch ungetestet.**
+- [x] **Teile aufs Auto setzen** (Wunsch Nutzer 25.11.2026, z. B. hv_polizei: Lichtbalken/Gitter/Rufnummern sind eigene Modelle):
+  Abschnitt „🧩 Teile aufs Auto setzen“ in Blaulicht & Extras. Teil wählen (Tuning-/weitere Teile aus dem Paket, eigene .yft/.ydr,
+  GTA-Objekt über `props.extract`), im Szenen-Viewer (MLO-Gizmo, Auto `locked`) verschieben/drehen, Zahlenfelder + 1-cm-Knöpfe.
+  „Fest einbauen“ → `vehicle:bakeParts`: Blender **-b** (ohne Fenster) mit `--attach teile.json` → `attach_parts()` importiert jedes Teil,
+  setzt Lage (GTA-Quaternion), `vehicle_make_extra()` → Extra N mit Kollision; danach `blender.apply` + bei „immer dran“
+  `requiredExtras` (equipApply mit `lights: null` = Blaulicht unangetastet). Teil-Texturen nur, wenn Bilddaten vorhanden; Texturen,
+  die das Auto schon hat, werden nicht überschrieben. Getestet: Blender headless (2 hv-Teile → Extra 3/4 schaltbar), App per CDP.
+  Offen: Greifpunkt liegt am Ursprung des Teils (bei Tuningteilen = Fahrzeugmitte), nicht in der Teilmitte.
+- [x] Umlaut-Mojibake in BlenderBridge.cs/Textures.cs (Meldungen wie „verschlÃ¼sselt“) repariert.
